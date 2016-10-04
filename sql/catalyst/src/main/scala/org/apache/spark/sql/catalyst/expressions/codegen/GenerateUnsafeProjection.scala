@@ -371,12 +371,13 @@ object GenerateUnsafeProjection extends CodeGenerator[Seq[Expression], UnsafePro
 
         private Object[] references;
         ${ctx.declareMutableStates()}
-        ${ctx.declareAddedFunctions()}
 
         public SpecificUnsafeProjection(Object[] references) {
           this.references = references;
           ${ctx.initMutableStates()}
         }
+
+        ${ctx.declareAddedFunctions()}
 
         // Scala.Function1 need this
         public java.lang.Object apply(java.lang.Object row) {
