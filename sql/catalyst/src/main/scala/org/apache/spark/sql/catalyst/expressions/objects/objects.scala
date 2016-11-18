@@ -109,9 +109,10 @@ case class Invoke(
     functionName: String,
     dataType: DataType,
     arguments: Seq[Expression] = Nil,
-    propagateNull: Boolean = true) extends Expression with NonSQLExpression {
+    propagateNull: Boolean = true,
+    returnNullable : Boolean = true) extends Expression with NonSQLExpression {
 
-  override def nullable: Boolean = true
+  override def nullable: Boolean = returnNullable
   override def children: Seq[Expression] = targetObject +: arguments
 
   override def eval(input: InternalRow): Any =
