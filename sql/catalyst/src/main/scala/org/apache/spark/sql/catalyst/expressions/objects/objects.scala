@@ -109,10 +109,9 @@ case class Invoke(
     functionName: String,
     dataType: DataType,
     arguments: Seq[Expression] = Nil,
-    propagateNull: Boolean = true,
-    returnNullable : Boolean = true) extends Expression with NonSQLExpression {
+    propagateNull: Boolean = true) extends Expression with NonSQLExpression {
 
-  override def nullable: Boolean = targetObject.nullable || returnNullable
+  override def nullable: Boolean = true
   override def children: Seq[Expression] = targetObject +: arguments
 
   override def eval(input: InternalRow): Any =
@@ -604,14 +603,8 @@ case class ExternalMapToCatalyst private(
 
   override def foldable: Boolean = false
 
-  override def dataType: MapType = {
-    val isPrimitiveType = valueType match {
-      case BooleanType | ByteType | ShortType | IntegerType | LongType |
-            FloatType | DoubleType => true
-      case _ => false
-    }
-    MapType(keyConverter.dataType, valueConverter.dataType, !isPrimitiveType)
-  }
+  override def dataType: MapType = MapType(
+    keyConverter.dataType, valueConverter.dataType, valueContainsNull = valueConverter.nullable)
 
   override def eval(input: InternalRow): Any =
     throw new UnsupportedOperationException("Only code-generated evaluation is supported")
