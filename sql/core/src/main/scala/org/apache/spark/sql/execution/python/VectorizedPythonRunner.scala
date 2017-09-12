@@ -17,7 +17,7 @@
 
 package org.apache.spark.sql.execution.python
 
-import java.io.{BufferedInputStream, BufferedOutputStream, DataInputStream, DataOutputStream}
+import java.io.{BufferedInputStream, BufferedOutputStream, DataInputStream, DataOutputStream, EOFException}
 import java.net.Socket
 import java.nio.charset.StandardCharsets
 
@@ -26,7 +26,7 @@ import scala.collection.JavaConverters._
 import org.apache.arrow.vector.VectorSchemaRoot
 import org.apache.arrow.vector.stream.{ArrowStreamReader, ArrowStreamWriter}
 
-import org.apache.spark.{SparkEnv, SparkFiles, TaskContext}
+import org.apache.spark.{SparkEnv, SparkException, SparkFiles, TaskContext, TaskKilledException}
 import org.apache.spark.api.python.{ChainedPythonFunctions, PythonEvalType, PythonException, PythonRDD, SpecialLengths}
 import org.apache.spark.internal.Logging
 import org.apache.spark.sql.catalyst.InternalRow
@@ -94,13 +94,11 @@ class VectorizedPythonRunner(
 
     val allocator = ArrowUtils.rootAllocator.newChildAllocator(
       s"stdin reader for $pythonExec", 0, Long.MaxValue)
-    val reader = new ArrowStreamReader(stream, allocator)
 
     new Iterator[InternalRow] {
-      private val root = reader.getVectorSchemaRoot
-      private val vectors = root.getFieldVectors.asScala.map { vector =>
-        new ArrowColumnVector(vector)
-      }.toArray[ColumnVector]
+      private var reader: ArrowStreamReader = _
+      private var root: VectorSchemaRoot = _
+      private var vectors: Array[ColumnVector] = _
 
       var closed = false
 
@@ -109,7 +107,9 @@ class VectorizedPythonRunner(
         // the input stream open. `reader.close` will close the socket and we can't reuse worker.
         // So here we simply not close the reader, which is problematic.
         if (!closed) {
-          root.close()
+          if (root != null) {
+            root.close()
+          }
           allocator.close()
         }
       }
@@ -117,65 +117,100 @@ class VectorizedPythonRunner(
       private[this] var batchLoaded = true
       private[this] var currentIter: Iterator[InternalRow] = Iterator.empty
 
-      override def hasNext: Boolean = batchLoaded && (currentIter.hasNext || loadNextBatch()) || {
-        root.close()
+      override def hasNext: Boolean = batchLoaded && (currentIter.hasNext || loadNext()) || {
+        if (root != null) {
+          root.close()
+        }
         allocator.close()
         closed = true
         false
       }
 
-      private def loadNextBatch(): Boolean = {
-        batchLoaded = reader.loadNextBatch()
-        if (batchLoaded) {
-          val batch = new ColumnarBatch(schema, vectors, root.getRowCount)
-          batch.setNumRows(root.getRowCount)
-          currentIter = batch.rowIterator().asScala
-        } else {
-          // end of arrow batches, handle some special signal
-          val signal = stream.readInt()
-          if (signal == SpecialLengths.PYTHON_EXCEPTION_THROWN) {
-            val exLength = stream.readInt()
-            val obj = new Array[Byte](exLength)
-            stream.readFully(obj)
-            throw new PythonException(new String(obj, StandardCharsets.UTF_8),
-              writerThread.exception.getOrElse(null))
-          }
-
-          assert(signal == SpecialLengths.TIMING_DATA)
-          // Timing data from worker
-          val bootTime = stream.readLong()
-          val initTime = stream.readLong()
-          val finishTime = stream.readLong()
-          val boot = bootTime - startTime
-          val init = initTime - bootTime
-          val finish = finishTime - initTime
-          val total = finishTime - startTime
-          logInfo("Times: total = %s, boot = %s, init = %s, finish = %s".format(total, boot,
-            init, finish))
-          val memoryBytesSpilled = stream.readLong()
-          val diskBytesSpilled = stream.readLong()
-          context.taskMetrics.incMemoryBytesSpilled(memoryBytesSpilled)
-          context.taskMetrics.incDiskBytesSpilled(diskBytesSpilled)
-
-          assert(stream.readInt() == SpecialLengths.END_OF_DATA_SECTION)
-          // We've finished the data section of the output, but we can still
-          // read some accumulator updates:
-          val numAccumulatorUpdates = stream.readInt()
-          (1 to numAccumulatorUpdates).foreach { _ =>
-            val updateLen = stream.readInt()
-            val update = new Array[Byte](updateLen)
-            stream.readFully(update)
-            accumulator.add(update)
-          }
-          // Check whether the worker is ready to be re-used.
-          if (stream.readInt() == SpecialLengths.END_OF_STREAM) {
-            if (reuse_worker) {
-              env.releasePythonWorker(pythonExec, envVars.asScala.toMap, worker)
-              released = true
+      private def loadNext(): Boolean = {
+        if (writerThread.exception.isDefined) {
+          throw writerThread.exception.get
+        }
+        try {
+          if (reader != null && batchLoaded) {
+            batchLoaded = reader.loadNextBatch()
+            if (batchLoaded) {
+              val batch = new ColumnarBatch(schema, vectors, root.getRowCount)
+              batch.setNumRows(root.getRowCount)
+              currentIter = batch.rowIterator().asScala
+              hasNext
+            } else {
+              loadNext()
+            }
+          } else {
+            stream.readInt() match {
+              case 0 =>
+                reader = new ArrowStreamReader(stream, allocator)
+                root = reader.getVectorSchemaRoot
+                vectors = root.getFieldVectors.asScala.map { vector =>
+                  new ArrowColumnVector(vector)
+                }.toArray[ColumnVector]
+                loadNext()
+              case SpecialLengths.TIMING_DATA =>
+                // Timing data from worker
+                val bootTime = stream.readLong()
+                val initTime = stream.readLong()
+                val finishTime = stream.readLong()
+                val boot = bootTime - startTime
+                val init = initTime - bootTime
+                val finish = finishTime - initTime
+                val total = finishTime - startTime
+                logInfo("Times: total = %s, boot = %s, init = %s, finish = %s".format(total, boot,
+                  init, finish))
+                val memoryBytesSpilled = stream.readLong()
+                val diskBytesSpilled = stream.readLong()
+                context.taskMetrics.incMemoryBytesSpilled(memoryBytesSpilled)
+                context.taskMetrics.incDiskBytesSpilled(diskBytesSpilled)
+                loadNext()
+              case SpecialLengths.PYTHON_EXCEPTION_THROWN =>
+                // Signals that an exception has been thrown in python
+                val exLength = stream.readInt()
+                val obj = new Array[Byte](exLength)
+                stream.readFully(obj)
+                throw new PythonException(new String(obj, StandardCharsets.UTF_8),
+                  writerThread.exception.getOrElse(null))
+              case SpecialLengths.END_OF_DATA_SECTION =>
+                // We've finished the data section of the output, but we can still
+                // read some accumulator updates:
+                val numAccumulatorUpdates = stream.readInt()
+                (1 to numAccumulatorUpdates).foreach { _ =>
+                  val updateLen = stream.readInt()
+                  val update = new Array[Byte](updateLen)
+                  stream.readFully(update)
+                  accumulator.add(update)
+                }
+                // Check whether the worker is ready to be re-used.
+                if (stream.readInt() == SpecialLengths.END_OF_STREAM) {
+                  if (reuse_worker) {
+                    env.releasePythonWorker(pythonExec, envVars.asScala.toMap, worker)
+                    released = true
+                  }
+                }
+                false
             }
           }
+        } catch {
+
+          case e: Exception if context.isInterrupted =>
+            logDebug("Exception thrown after task interruption", e)
+            throw new TaskKilledException(context.getKillReason().getOrElse("unknown reason"))
+
+          case e: Exception if env.isStopped =>
+            logDebug("Exception thrown after context is stopped", e)
+            false  // exit silently
+
+          case e: Exception if writerThread.exception.isDefined =>
+            logError("Python worker exited unexpectedly (crashed)", e)
+            logError("This may have been caused by a prior exception:", writerThread.exception.get)
+            throw writerThread.exception.get
+
+          case eof: EOFException =>
+            throw new SparkException("Python worker exited unexpectedly (crashed)", eof)
         }
-        hasNext // skip empty batches if any
       }
 
       override def next(): InternalRow = {

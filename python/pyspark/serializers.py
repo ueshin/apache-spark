@@ -589,6 +589,7 @@ class VectorizedSerializer(Serializer):
     def dump_stream(self, iterator, stream):
         import pandas as pd
         import pyarrow as pa
+        write_int(0, stream)
         # the schema is set at worker.py#read_vectorized_udfs
         writer = pa.RecordBatchStreamWriter(stream, self.schema)
         names = self.schema.names
