@@ -3229,7 +3229,7 @@ class VectorizedUDFTests(ReusedPySparkTestCase):
         self.assertEquals(df.collect(), res.collect())
 
     def test_vectorized_udf_zero_parameter(self):
-        from pyspark.sql.functions import pandas_udf, col
+        from pyspark.sql.functions import pandas_udf
         import pandas as pd
         df = self.spark.range(100000)
         f0 = pandas_udf(lambda **kwargs: pd.Series(1).repeat(kwargs['size']), LongType())
@@ -3238,11 +3238,24 @@ class VectorizedUDFTests(ReusedPySparkTestCase):
 
     def test_vectorized_udf_datatype_string(self):
         from pyspark.sql.functions import pandas_udf, col
-        import pandas as pd
-        df = self.spark.range(100000)
-        f0 = pandas_udf(lambda **kwargs: pd.Series(1).repeat(kwargs['size']), "long")
-        res = df.select(f0())
-        self.assertEquals(df.select(lit(1)).collect(), res.collect())
+        df = self.spark.range(10).select(
+            col('id').cast('string').alias('str'),
+            col('id').cast('int').alias('int'),
+            col('id').alias('long'),
+            col('id').cast('float').alias('float'),
+            col('id').cast('double').alias('double'),
+            col('id').cast('boolean').alias('bool'))
+        f = lambda x: x
+        str_f = pandas_udf(f, 'string')
+        int_f = pandas_udf(f, 'integer')
+        long_f = pandas_udf(f, 'long')
+        float_f = pandas_udf(f, 'float')
+        double_f = pandas_udf(f, 'double')
+        bool_f = pandas_udf(f, 'boolean')
+        res = df.select(str_f(col('str')), int_f(col('int')),
+                        long_f(col('long')), float_f(col('float')),
+                        double_f(col('double')), bool_f(col('bool')))
+        self.assertEquals(df.collect(), res.collect())
 
     def test_vectorized_udf_complex(self):
         from pyspark.sql.functions import pandas_udf, col, expr
