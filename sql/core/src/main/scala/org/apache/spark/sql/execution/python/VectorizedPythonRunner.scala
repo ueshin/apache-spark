@@ -43,6 +43,7 @@ class VectorizedPythonRunner(
     batchSize: Int,
     bufferSize: Int,
     reuse_worker: Boolean,
+    isUDAF: Boolean,
     argOffsets: Array[Array[Int]]) extends Logging {
 
   require(funcs.length == argOffsets.length, "argOffsets should have the same length as funcs")
@@ -288,8 +289,13 @@ class VectorizedPythonRunner(
         }
         dataOut.flush()
 
-        // SQL_VECTORIZED_UDF means arrow mode
-        dataOut.writeInt(PythonEvalType.SQL_VECTORIZED_UDF)
+        // SQL_VECTORIZED_UDF/SQL_VECTORIZED_UDAF means arrow mode
+        if (isUDAF) {
+          dataOut.writeInt(PythonEvalType.SQL_VECTORIZED_UDAF)
+        }
+        else {
+          dataOut.writeInt(PythonEvalType.SQL_VECTORIZED_UDF)
+        }
         dataOut.writeInt(funcs.length)
         funcs.zip(argOffsets).foreach { case (chained, offsets) =>
           dataOut.writeInt(offsets.length)
