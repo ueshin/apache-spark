@@ -76,7 +76,7 @@ except:
     pass
 
 if _have_pandas and _have_arrow:
-    from pyspark.sql.functions import pandas_udf
+    from pyspark.sql.functions import pandas_udf, pandas_udaf
 
 
 class UTCOffsetTimezone(datetime.tzinfo):
@@ -3272,6 +3272,39 @@ class VectorizedUDFTests(ReusedPySparkTestCase):
         with QuietTest(self.sc):
             with self.assertRaisesRegexp(Exception, 'cannot mix vectorized udf and normal udf'):
                 df.select(row_by_row_udf(col('id')), pd_udf(col('id'))).collect()
+
+
+@unittest.skipIf(not _have_pandas or not _have_arrow, "Pandas or Arrow not installed")
+class VectorizedUDAFTests(ReusedPySparkTestCase):
+
+    @classmethod
+    def setUpClass(cls):
+        ReusedPySparkTestCase.setUpClass()
+        cls.spark = SparkSession(cls.sc)
+
+    @classmethod
+    def tearDownClass(cls):
+        ReusedPySparkTestCase.tearDownClass()
+        cls.spark.stop()
+
+    def test_vectorized_udaf_basic(self):
+        df = self.spark.range(100).select(col('id').alias('n'), (col('id') % 2 == 0).alias('g'))
+
+        @pandas_udaf(LongType(), algebraic=True)
+        def p_sum(v):
+            return v.sum()
+
+        @pandas_udaf(
+            DoubleType(),
+            algebraic=False,
+            partial=lambda v: (v.sum(), len(v)),
+            bufferType=StructType().add("sum", LongType()).add("count", LongType()))
+        def p_avg(sum, count):
+            return (sum.sum() / count.sum())
+
+        res = df.groupBy(col('g')).agg(p_sum(col('n')), expr('count(n)'), p_avg(col('n')))
+        expected = df.groupBy(col('g')).agg(expr('sum(n)'), expr('count(n)'), expr('avg(n)'))
+        self.assertEquals(expected.collect(), res.collect())
 
 
 if __name__ == "__main__":

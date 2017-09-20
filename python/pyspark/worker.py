@@ -36,7 +36,7 @@ from pyspark.serializers import write_with_length, write_int, read_long, \
     write_long, read_int, SpecialLengths, UTF8Deserializer, PickleSerializer, \
     BatchedSerializer, VectorizedSerializer
 from pyspark import shuffle
-from pyspark.sql.types import toArrowSchema
+from pyspark.sql.types import StructType, toArrowSchema
 
 pickleSer = PickleSerializer()
 utf8_deserializer = UTF8Deserializer()
@@ -46,6 +46,7 @@ class PythonEvalType(object):
     NON_UDF = 0
     SQL_BATCHED_UDF = 1
     SQL_VECTORIZED_UDF = 2
+    SQL_VECTORIZED_UDAF = 3
 
 
 def report_times(outfile, boot, init, finish):
@@ -159,6 +160,49 @@ def read_vectorized_udfs(pickleSer, infile):
     return func, None, ser, ser
 
 
+def read_vectorized_udafs(pickleSer, infile):
+    import pandas as pd
+    num_udfs = read_int(infile)
+    udfs = {}
+    call_udf = []
+    types = []
+    for i in range(num_udfs):
+        arg_offsets, udf, return_type = read_single_udf(pickleSer, infile, True)
+        if type(return_type) == StructType:
+            for field in return_type.fields:
+                types.append(field.dataType)
+        else:
+            types.append(return_type)
+        udfs['f%d' % i] = udf
+        args = ["a[%d]" % o for o in arg_offsets]
+        call_udf.append("untuplize(f%d(%s))" % (i, ", ".join(args)))
+
+    def untuplize(v):
+        if not isinstance(v, tuple):
+            return (v,)
+        else:
+            return v
+
+    udfs['untuplize'] = untuplize
+
+    # Create function like this:
+    #   lambda a: [f0(a[0]), f1(a[1], a[2]), f2(a[3])]
+    apply_str = "lambda a: [%s]" % (", ".join(call_udf))
+    applyer = eval(apply_str, udfs)
+
+    def mapper(vectors):
+        num_rows = vectors[0]
+        vs = vectors[1:]
+        results = [list(sum(applyer([v[r] for v in vs]), ())) for r in range(num_rows)]
+        return [pd.Series(x) for x in zip(*results)]
+
+    func = lambda _, it: map(mapper, it)
+    ser = VectorizedSerializer()
+    ser.schema = toArrowSchema(types)
+    # profiling is not supported for UDF
+    return func, None, ser, ser
+
+
 def main(infile, outfile):
     try:
         boot_time = time.time()
@@ -212,7 +256,9 @@ def main(infile, outfile):
 
         _accumulatorRegistry.clear()
         mode = read_int(infile)
-        if mode == PythonEvalType.SQL_VECTORIZED_UDF:
+        if mode == PythonEvalType.SQL_VECTORIZED_UDAF:
+            func, profiler, deserializer, serializer = read_vectorized_udafs(pickleSer, infile)
+        elif mode == PythonEvalType.SQL_VECTORIZED_UDF:
             func, profiler, deserializer, serializer = read_vectorized_udfs(pickleSer, infile)
         elif mode == PythonEvalType.SQL_BATCHED_UDF:
             func, profiler, deserializer, serializer = read_udfs(pickleSer, infile)

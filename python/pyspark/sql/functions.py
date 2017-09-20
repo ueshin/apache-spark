@@ -2214,6 +2214,146 @@ def udf(f=None, returnType=StringType()):
         return _udf(f=f, returnType=returnType, vectorized=False)
 
 
+# ---------------------------- User Defined Aggregate Function ----------------------------------
+
+class UserDefinedAggregateFunction(object):
+    """
+    User defined aggregate function in Python
+
+    .. versionadded:: 2.3
+    """
+    def __init__(self, final, returnType, partial, bufferType, name=None):
+        for f in [final, partial]:
+            if not callable(f):
+                raise TypeError(
+                    "Not a function or callable (__call__ is not defined): "
+                    "{0}".format(type(f)))
+
+        self.final = final
+        self._returnType = returnType
+        self.partial = partial
+        self._bufferType = bufferType
+        # Stores UserDefinedPythonFunctions jobj, once initialized
+        self._returnType_placeholder = None
+        self._bufferType_placeholder = None
+        self._judaf_placeholder = None
+        self._name = name or (
+            final.__name__ if hasattr(final, '__name__')
+            else final.__class__.__name__)
+
+    @property
+    def returnType(self):
+        # This makes sure this is called after SparkContext is initialized.
+        # ``_parse_datatype_string`` accesses to JVM for parsing a DDL formatted string.
+        if self._returnType_placeholder is None:
+            if isinstance(self._returnType, DataType):
+                self._returnType_placeholder = self._returnType
+            else:
+                self._returnType_placeholder = _parse_datatype_string(self._returnType)
+        return self._returnType_placeholder
+
+    @property
+    def bufferType(self):
+        # This makes sure this is called after SparkContext is initialized.
+        # ``_parse_datatype_string`` accesses to JVM for parsing a DDL formatted string.
+        if self._bufferType_placeholder is None:
+            if isinstance(self._bufferType, DataType):
+                self._bufferType_placeholder = self._bufferType
+            else:
+                self._bufferType_placeholder = _parse_datatype_string(self._bufferType)
+        return self._bufferType_placeholder
+
+    @property
+    def _judaf(self):
+        # It is possible that concurrent access, to newly created UDF,
+        # will initialize multiple UserDefinedPythonFunctions.
+        # This is unlikely, doesn't affect correctness,
+        # and should have a minimal performance impact.
+        if self._judaf_placeholder is None:
+            self._judaf_placeholder = self._create_judaf()
+        return self._judaf_placeholder
+
+    def _create_judaf(self):
+        from pyspark.sql import SparkSession
+
+        spark = SparkSession.builder.getOrCreate()
+        sc = spark.sparkContext
+
+        wrapped_final = _wrap_function(sc, self.final, self.returnType)
+        wrapped_partial = _wrap_function(sc, self.partial, self.bufferType)
+        jdt_final = spark._jsparkSession.parseDataType(self.returnType.json())
+        jdt_partial = spark._jsparkSession.parseDataType(self.bufferType.json())
+        judaf = sc._jvm.org.apache.spark.sql.execution.python.UserDefinedAggregatePythonFunction(
+            self._name, wrapped_final, jdt_final, wrapped_partial, jdt_partial)
+        return judaf
+
+    def __call__(self, *cols):
+        judaf = self._judaf
+        sc = SparkContext._active_spark_context
+        return Column(judaf.apply(_to_seq(sc, cols, _to_java_column)))
+
+    def _wrapped(self):
+        """
+        Wrap this udf with a function and attach docstring from func
+        """
+
+        # It is possible for a callable instance without __name__ attribute or/and
+        # __module__ attribute to be wrapped here. For example, functools.partial. In this case,
+        # we should avoid wrapping the attributes from the wrapped function to the wrapper
+        # function. So, we take out these attribute names from the default names to set and
+        # then manually assign it after being wrapped.
+        assignments = tuple(
+            a for a in functools.WRAPPER_ASSIGNMENTS if a != '__name__' and a != '__module__')
+
+        @functools.wraps(self.final, assigned=assignments)
+        def wrapper(*args):
+            return self(*args)
+
+        wrapper.__name__ = self._name
+        wrapper.__module__ = (self.final.__module__ if hasattr(self.final, '__module__')
+                              else self.final.__class__.__module__)
+        wrapper.final = self.final
+        wrapper.returnType = self.returnType
+        wrapper.partial = self.partial
+        wrapper.bufferType = self.bufferType
+
+        return wrapper
+
+
+if _have_pandas and _have_arrow:
+
+    def pandas_udaf(final=None, returnType=StringType(), algebraic=False, partial=None,
+                    bufferType=None):
+        """
+        Creates a :class:`Column` expression representing a vectorized user defined aggregate
+        function (UDAF).
+        """
+        def _udaf(final, returnType, algebraic, partial, bufferType):
+            if algebraic:
+                partial = partial or final
+                bufferType = bufferType or returnType
+            else:
+                if partial is None or bufferType is None:
+                    raise ValueError(
+                        "If not algebraic, partial and bufferType must be defined.")
+            udaf_obj = UserDefinedAggregateFunction(final, returnType, partial, bufferType)
+            return udaf_obj._wrapped()
+
+        # decorator @pandas_udaf, @pandas_udaf() or @pandas_udaf(dataType())
+        if final is None or isinstance(final, (str, DataType)):
+            # If DataType has been passed as a positional argument
+            # for decorator use it as a returnType
+            if isinstance(returnType, bool):
+                algebraic = returnType
+                returnType = StringType()
+            return_type = final or returnType
+            return functools.partial(_udaf, returnType=return_type, algebraic=algebraic,
+                                     partial=partial, bufferType=bufferType)
+        else:
+            return _udaf(final=final, returnType=returnType, algebraic=algebraic,
+                         partial=partial, bufferType=bufferType)
+
+
 blacklist = ['map', 'since', 'ignore_unicode_prefix']
 __all__ = [k for k, v in globals().items()
            if not k.startswith('_') and k[0].islower() and callable(v) and k not in blacklist]

@@ -127,7 +127,7 @@ case class BatchEvalPythonExec(udfs: Seq[PythonUDF], output: Seq[Attribute], chi
 
         // Output iterator for results from Python.
         val outputIterator =
-          new VectorizedPythonRunner(pyFuncs, 10000, bufferSize, reuseWorker, argOffsets)
+          new VectorizedPythonRunner(pyFuncs, 10000, bufferSize, reuseWorker, false, argOffsets)
             .compute(inputIterator, schema, context.partitionId(), context)
         val joined = new JoinedRow
         val resultProj = UnsafeProjection.create(output, output)
