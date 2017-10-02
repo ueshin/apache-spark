@@ -159,3 +159,98 @@ class UserDefinedFunction(object):
         wrapper.evalType = self.evalType
 
         return wrapper
+
+
+class UserDefinedAggregateFunction(object):
+    """
+    User defined aggregate function in Python (UDAF).
+
+    .. versionadded:: 2.3
+    """
+
+    def __init__(self):
+        self._returnType_placeholder = None
+        self._bufferType_placeholder = None
+        self._judaf_placeholder = None
+
+    @classmethod
+    def name(cls):
+        return cls.__name__.lower()
+
+    @classmethod
+    def algebraic(cls):
+        """
+        True if the final function can be used for the partial aggregation.
+        """
+        raise NotImplementedError("UDAF must implement algebraic().")
+
+    @classmethod
+    def returnType(cls):
+        raise NotImplementedError("UDAF must implement returnType().")
+
+    @classmethod
+    def bufferType(cls):
+        if cls.algebraic():
+            return cls.returnType()
+        else:
+            raise NotImplementedError("UDAF must implement bufferType() if not algebraic.")
+
+    def final(self, *args):
+        raise NotImplementedError("UDAF must implement final().")
+
+    def partial(self, *args):
+        if self.algebraic():
+            return self.final(*args)
+        else:
+            raise NotImplementedError("UDAF must implement partial() if not algebraic.")
+
+    @property
+    def _returnType(self):
+        # This makes sure this is called after SparkContext is initialized.
+        # ``_parse_datatype_string`` accesses to JVM for parsing a DDL formatted string.
+        if self._returnType_placeholder is None:
+            if isinstance(self.returnType(), DataType):
+                self._returnType_placeholder = self.returnType()
+            else:
+                self._returnType_placeholder = _parse_datatype_string(self.returnType())
+        return self._returnType_placeholder
+
+    @property
+    def _bufferType(self):
+        # This makes sure this is called after SparkContext is initialized.
+        # ``_parse_datatype_string`` accesses to JVM for parsing a DDL formatted string.
+        if self._bufferType_placeholder is None:
+            if isinstance(self.bufferType(), DataType):
+                self._bufferType_placeholder = self.bufferType()
+            else:
+                self._bufferType_placeholder = _parse_datatype_string(self.bufferType())
+        return self._bufferType_placeholder
+
+    @property
+    def _judaf(self):
+        # It is possible that concurrent access, to newly created UDF,
+        # will initialize multiple UserDefinedPythonFunctions.
+        # This is unlikely, doesn't affect correctness,
+        # and should have a minimal performance impact.
+        if self._judaf_placeholder is None:
+            self._judaf_placeholder = self._create_judaf()
+        return self._judaf_placeholder
+
+    def _create_judaf(self):
+        from pyspark.sql import SparkSession
+
+        spark = SparkSession.builder.getOrCreate()
+        sc = spark.sparkContext
+
+        wrapped_final = _wrap_function(sc, self.final, self._returnType)
+        wrapped_partial = _wrap_function(sc, self.partial, self._bufferType)
+        jdt_final = spark._jsparkSession.parseDataType(self._returnType.json())
+        jdt_partial = spark._jsparkSession.parseDataType(self._bufferType.json())
+        judaf = sc._jvm.org.apache.spark.sql.execution.python.UserDefinedAggregatePythonFunction(
+            self.name(), wrapped_final, jdt_final, wrapped_partial, jdt_partial)
+        return judaf
+
+    def __call__(self, *cols):
+        judaf = self._judaf
+        sc = SparkContext._active_spark_context
+        return Column(judaf.apply(_to_seq(sc, cols, _to_java_column)))
