@@ -3849,6 +3849,55 @@ class GroupbyApplyTests(ReusedSQLTestCase):
                 df.groupby('id').apply(f).collect()
 
 
+@unittest.skipIf(not _have_pandas or not _have_arrow, "Pandas or Arrow not installed")
+class VectorizedUDAFTests(ReusedSQLTestCase):
+
+    def test_vectorized_udaf_basic(self):
+        from pyspark.sql.functions import col, expr
+        from pyspark.sql.udf import UserDefinedAggregateFunction
+        df = self.spark.range(100).select(col('id').alias('n'), (col('id') % 2 == 0).alias('g'))
+
+        class Sum(UserDefinedAggregateFunction):
+
+            @classmethod
+            def algebraic(cls):
+                return True
+
+            @classmethod
+            def returnType(cls):
+                return LongType()
+
+            def final(self, *args):
+                return args[0].sum()
+
+        class Avg(UserDefinedAggregateFunction):
+
+            @classmethod
+            def algebraic(cls):
+                return False
+
+            @classmethod
+            def returnType(cls):
+                return DoubleType()
+
+            @classmethod
+            def bufferType(cls):
+                return StructType().add("sum", LongType()).add("count", LongType())
+
+            def partial(self, *args):
+                return (args[0].sum(), args[0].count())
+
+            def final(self, *args):
+                return (args[0].sum() / args[1].sum())
+
+        p_sum = Sum()
+        p_avg = Avg()
+
+        res = df.groupBy(col('g')).agg(p_sum(col('n')), expr('count(n)'), p_avg(col('n')))
+        expected = df.groupBy(col('g')).agg(expr('sum(n)'), expr('count(n)'), expr('avg(n)'))
+        self.assertEquals(expected.collect(), res.collect())
+
+
 if __name__ == "__main__":
     from pyspark.sql.tests import *
     if xmlrunner:
