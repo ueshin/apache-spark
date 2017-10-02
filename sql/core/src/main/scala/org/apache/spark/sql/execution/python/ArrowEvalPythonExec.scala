@@ -58,10 +58,15 @@ private class BatchIterator[T](iter: Iterator[T], batchSize: Int)
 /**
  * A physical plan that evaluates a [[PythonUDF]],
  */
-case class ArrowEvalPythonExec(udfs: Seq[PythonUDF], output: Seq[Attribute], child: SparkPlan)
+case class ArrowEvalPythonExec(
+    udfs: Seq[PythonUDF],
+    output: Seq[Attribute],
+    child: SparkPlan,
+    evalType: Int = PythonEvalType.SQL_PANDAS_SCALAR_UDF,
+    _batchSize: Option[Int] = None)
   extends EvalPythonExec(udfs, output, child) {
 
-  private val batchSize = conf.arrowMaxRecordsPerBatch
+  private val batchSize = _batchSize.getOrElse(conf.arrowMaxRecordsPerBatch)
   private val sessionLocalTimeZone = conf.sessionLocalTimeZone
 
   protected override def evaluate(
@@ -80,8 +85,7 @@ case class ArrowEvalPythonExec(udfs: Seq[PythonUDF], output: Seq[Attribute], chi
     val batchIter = if (batchSize > 0) new BatchIterator(iter, batchSize) else Iterator(iter)
 
     val columnarBatchIter = new ArrowPythonRunner(
-        funcs, bufferSize, reuseWorker,
-        PythonEvalType.SQL_PANDAS_SCALAR_UDF, argOffsets, schema, sessionLocalTimeZone)
+        funcs, bufferSize, reuseWorker, evalType, argOffsets, schema, sessionLocalTimeZone)
       .compute(batchIter, context.partitionId(), context)
 
     new Iterator[InternalRow] {
