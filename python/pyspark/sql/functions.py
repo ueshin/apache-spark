@@ -32,7 +32,7 @@ from pyspark.serializers import PickleSerializer, AutoBatchedSerializer
 from pyspark.sql.column import Column, _to_java_column, _to_seq
 from pyspark.sql.dataframe import DataFrame
 from pyspark.sql.types import StringType, DataType
-from pyspark.sql.udf import UserDefinedFunction, _create_udf
+from pyspark.sql.udf import UserDefinedFunction, UserDefinedAggregateFunction, _create_udf
 
 
 def _create_function(name, doc=""):
@@ -2239,6 +2239,30 @@ def pandas_udf(f=None, returnType=None, functionType=None):
         return functools.partial(_create_udf, returnType=return_type, evalType=eval_type)
     else:
         return _create_udf(f=f, returnType=return_type, evalType=eval_type)
+
+
+# ---------------------------- User Defined Aggregate Function ----------------------------------
+
+def pandas_udaf(f=None, returnType=StringType(), supportsPartial=False):
+    """
+    Creates a :class:`Column` expression representing a vectorized user defined aggregate
+    function (UDAF).
+    """
+    def _udaf(f, returnType, supportsPartial):
+        udaf_obj = UserDefinedAggregateFunction(f, returnType, supportsPartial)
+        return udaf_obj._wrapped()
+
+    # decorator @pandas_udaf, @pandas_udaf() or @pandas_udaf(dataType())
+    if f is None or isinstance(f, (str, DataType)):
+        # If DataType has been passed as a positional argument
+        # for decorator use it as a returnType
+        if isinstance(returnType, bool):
+            supportsPartial = returnType
+            returnType = StringType()
+        return_type = f or returnType
+        return functools.partial(_udaf, returnType=return_type, supportsPartial=supportsPartial)
+    else:
+        return _udaf(f=f, returnType=returnType, supportsPartial=supportsPartial)
 
 
 blacklist = ['map', 'since', 'ignore_unicode_prefix']

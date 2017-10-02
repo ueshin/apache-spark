@@ -159,3 +159,90 @@ class UserDefinedFunction(object):
         wrapper.evalType = self.evalType
 
         return wrapper
+
+
+class UserDefinedAggregateFunction(object):
+    """
+    User defined aggregate function in Python
+
+    .. versionadded:: 2.3
+    """
+    def __init__(self, func, returnType, supportsPartial, name=None):
+        if not callable(func):
+            raise TypeError(
+                "Not a function or callable (__call__ is not defined): "
+                "{0}".format(type(func)))
+
+        self.func = func
+        self._returnType = returnType
+        self.supportsPartial = supportsPartial
+        # Stores UserDefinedPythonFunctions jobj, once initialized
+        self._returnType_placeholder = None
+        self._judaf_placeholder = None
+        self._name = name or (
+            func.__name__ if hasattr(func, '__name__')
+            else func.__class__.__name__)
+
+    @property
+    def returnType(self):
+        # This makes sure this is called after SparkContext is initialized.
+        # ``_parse_datatype_string`` accesses to JVM for parsing a DDL formatted string.
+        if self._returnType_placeholder is None:
+            if isinstance(self._returnType, DataType):
+                self._returnType_placeholder = self._returnType
+            else:
+                self._returnType_placeholder = _parse_datatype_string(self._returnType)
+        return self._returnType_placeholder
+
+    @property
+    def _judaf(self):
+        # It is possible that concurrent access, to newly created UDF,
+        # will initialize multiple UserDefinedPythonFunctions.
+        # This is unlikely, doesn't affect correctness,
+        # and should have a minimal performance impact.
+        if self._judaf_placeholder is None:
+            self._judaf_placeholder = self._create_judaf()
+        return self._judaf_placeholder
+
+    def _create_judaf(self):
+        from pyspark.sql import SparkSession
+
+        spark = SparkSession.builder.getOrCreate()
+        sc = spark.sparkContext
+
+        wrapped_func = _wrap_function(sc, self.func, self.returnType)
+        jdt = spark._jsparkSession.parseDataType(self.returnType.json())
+        judaf = sc._jvm.org.apache.spark.sql.execution.python.UserDefinedAggregatePythonFunction(
+            self._name, wrapped_func, jdt, self.supportsPartial)
+        return judaf
+
+    def __call__(self, *cols):
+        judaf = self._judaf
+        sc = SparkContext._active_spark_context
+        return Column(judaf.apply(_to_seq(sc, cols, _to_java_column)))
+
+    def _wrapped(self):
+        """
+        Wrap this udf with a function and attach docstring from func
+        """
+
+        # It is possible for a callable instance without __name__ attribute or/and
+        # __module__ attribute to be wrapped here. For example, functools.partial. In this case,
+        # we should avoid wrapping the attributes from the wrapped function to the wrapper
+        # function. So, we take out these attribute names from the default names to set and
+        # then manually assign it after being wrapped.
+        assignments = tuple(
+            a for a in functools.WRAPPER_ASSIGNMENTS if a != '__name__' and a != '__module__')
+
+        @functools.wraps(self.func, assigned=assignments)
+        def wrapper(*args):
+            return self(*args)
+
+        wrapper.__name__ = self._name
+        wrapper.__module__ = (self.func.__module__ if hasattr(self.func, '__module__')
+                              else self.func.__class__.__module__)
+        wrapper.func = self.func
+        wrapper.returnType = self.returnType
+        wrapper.supportsPartial = self.supportsPartial
+
+        return wrapper
