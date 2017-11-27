@@ -32,7 +32,7 @@ from pyspark.serializers import PickleSerializer, AutoBatchedSerializer
 from pyspark.sql.column import Column, _to_java_column, _to_seq
 from pyspark.sql.dataframe import DataFrame
 from pyspark.sql.types import StringType, DataType
-from pyspark.sql.udf import UserDefinedFunction, _create_udf
+from pyspark.sql.udf import UserDefinedFunction, UserDefinedAggregateFunction, _create_udf
 
 
 def _create_function(name, doc=""):
@@ -2233,6 +2233,40 @@ def pandas_udf(f=None, returnType=None, functionType=None):
         return functools.partial(_create_udf, returnType=return_type, evalType=eval_type)
     else:
         return _create_udf(f=f, returnType=return_type, evalType=eval_type)
+
+
+# ---------------------------- User Defined Aggregate Function ----------------------------------
+
+def pandas_udaf(final=None, returnType=StringType(), algebraic=False, partial=None,
+                bufferType=None):
+    """
+    Creates a :class:`Column` expression representing a vectorized user defined aggregate
+    function (UDAF).
+    """
+    def _udaf(final, returnType, algebraic, partial, bufferType):
+        if algebraic:
+            partial = partial or final
+            bufferType = bufferType or returnType
+        else:
+            if partial is None or bufferType is None:
+                raise ValueError(
+                    "If not algebraic, partial and bufferType must be defined.")
+        udaf_obj = UserDefinedAggregateFunction(final, returnType, partial, bufferType)
+        return udaf_obj._wrapped()
+
+    # decorator @pandas_udaf, @pandas_udaf() or @pandas_udaf(dataType())
+    if final is None or isinstance(final, (str, DataType)):
+        # If DataType has been passed as a positional argument
+        # for decorator use it as a returnType
+        if isinstance(returnType, bool):
+            algebraic = returnType
+            returnType = StringType()
+        return_type = final or returnType
+        return functools.partial(_udaf, returnType=return_type, algebraic=algebraic,
+                                 partial=partial, bufferType=bufferType)
+    else:
+        return _udaf(final=final, returnType=returnType, algebraic=algebraic,
+                     partial=partial, bufferType=bufferType)
 
 
 blacklist = ['map', 'since', 'ignore_unicode_prefix']

@@ -33,7 +33,7 @@ from pyspark.rdd import PythonEvalType
 from pyspark.serializers import write_with_length, write_int, read_long, \
     write_long, read_int, SpecialLengths, UTF8Deserializer, PickleSerializer, \
     BatchedSerializer, ArrowStreamPandasSerializer
-from pyspark.sql.types import to_arrow_type
+from pyspark.sql.types import to_arrow_type, StructType
 from pyspark import shuffle
 
 pickleSer = PickleSerializer()
@@ -110,6 +110,24 @@ def wrap_pandas_group_map_udf(f, return_type):
     return wrapped
 
 
+def wrap_pandas_group_aggregate_udf(f, return_type):
+    import pandas as pd
+    if isinstance(return_type, StructType):
+        arrow_return_types = [to_arrow_type(field.dataType) for field in return_type]
+    else:
+        arrow_return_types = [to_arrow_type(return_type)]
+
+    def fn(*args):
+        out = f(*[pd.Series(arg[0]) for arg in args])
+        if not isinstance(out, (tuple, list)):
+            out = (out,)
+        assert len(out) == len(arrow_return_types), \
+            'Columns of tuple don\'t match return schema'
+
+        return [(pd.Series(v), t) for v, t in zip(out, arrow_return_types)]
+    return fn
+
+
 def read_single_udf(pickleSer, infile, eval_type):
     num_arg = read_int(infile)
     arg_offsets = [read_int(infile) for i in range(num_arg)]
@@ -126,6 +144,8 @@ def read_single_udf(pickleSer, infile, eval_type):
         return arg_offsets, wrap_pandas_scalar_udf(row_func, return_type)
     elif eval_type == PythonEvalType.SQL_PANDAS_GROUP_MAP_UDF:
         return arg_offsets, wrap_pandas_group_map_udf(row_func, return_type)
+    elif eval_type == PythonEvalType.SQL_PANDAS_GROUP_AGGREGATE_UDF:
+        return arg_offsets, wrap_pandas_group_aggregate_udf(row_func, return_type)
     else:
         return arg_offsets, wrap_udf(row_func, return_type)
 
@@ -143,13 +163,17 @@ def read_udfs(pickleSer, infile, eval_type):
     #   lambda a: (f0(a0), f1(a1, a2), f2(a3))
     # In the special case of a single UDF this will return a single result rather
     # than a tuple of results; this is the format that the JVM side expects.
-    mapper_str = "lambda a: (%s)" % (", ".join(call_udf))
+    if eval_type == PythonEvalType.SQL_PANDAS_GROUP_AGGREGATE_UDF:
+        mapper_str = "lambda a: sum([%s], [])" % (", ".join(call_udf))
+    else:
+        mapper_str = "lambda a: (%s)" % (", ".join(call_udf))
     mapper = eval(mapper_str, udfs)
 
     func = lambda _, it: map(mapper, it)
 
     if eval_type == PythonEvalType.SQL_PANDAS_SCALAR_UDF \
-       or eval_type == PythonEvalType.SQL_PANDAS_GROUP_MAP_UDF:
+       or eval_type == PythonEvalType.SQL_PANDAS_GROUP_MAP_UDF \
+       or eval_type == PythonEvalType.SQL_PANDAS_GROUP_AGGREGATE_UDF:
         ser = ArrowStreamPandasSerializer()
     else:
         ser = BatchedSerializer(PickleSerializer(), 100)
