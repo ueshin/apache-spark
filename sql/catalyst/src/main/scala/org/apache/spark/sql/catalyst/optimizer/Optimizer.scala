@@ -159,8 +159,7 @@ abstract class Optimizer(catalogManager: CatalogManager)
       PullOutGroupingExpressions,
       ComputeCurrentTime,
       ReplaceCurrentLike(catalogManager),
-      SpecialDatetimeValues,
-      RewriteAsOfJoin) ::
+      SpecialDatetimeValues) ::
     //////////////////////////////////////////////////////////////////////////////////////////
     // Optimizer rules start here
     //////////////////////////////////////////////////////////////////////////////////////////
@@ -186,6 +185,8 @@ abstract class Optimizer(catalogManager: CatalogManager)
       // PropagateEmptyRelation can change the nullability of an attribute from nullable to
       // non-nullable when an empty relation child of a Union is removed
       UpdateAttributeNullability) ::
+    Batch("Rewrite with Correlated Expressions", Once,
+      RewriteAsOfJoin) ::
     Batch("Pullup Correlated Expressions", Once,
       OptimizeOneRowRelationSubquery,
       PullupCorrelatedPredicates) ::
