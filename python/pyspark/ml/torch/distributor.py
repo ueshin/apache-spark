@@ -626,7 +626,7 @@ class TorchDistributor(Distributor):
         train_object: Union[Callable, str],
         *args: Any,
     ) -> Optional[Any]:
-        if not framework_wrapper_fn:
+        if not framework_wrapper_fn:  # type: ignore[truthy-function]
             raise RuntimeError("Unknown combination of parameters")
 
         log_streaming_server = LogStreamingServer()
