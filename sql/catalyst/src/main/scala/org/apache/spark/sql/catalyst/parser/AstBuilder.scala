@@ -1540,6 +1540,31 @@ class AstBuilder extends SqlBaseParserBaseVisitor[AnyRef] with SQLConfHelper wit
   }
 
   /**
+   * Create a relation argument for a table-valued function argument.
+   */
+  override def visitFunctionTableRelationArgument(
+      ctx: FunctionTableRelationArgumentContext): Expression = withOrigin(ctx) {
+    val p = if (ctx.identifierReference != null) {
+      createUnresolvedRelation(ctx.identifierReference)
+    } else {
+      plan(ctx.query)
+    }
+    FunctionTableRelationArgumentExpression(p)
+  }
+
+  /**
+   * Create a table-valued function argument.
+   */
+  override def visitFunctionTableArgument(
+      ctx: FunctionTableArgumentContext): Expression = withOrigin(ctx) {
+    if (ctx.functionTableRelationArgument != null) {
+      visitFunctionTableRelationArgument(ctx.functionTableRelationArgument)
+    } else {
+      expression(ctx.expression)
+    }
+  }
+
+  /**
    * Create a table-valued function call with arguments, e.g. range(1000)
    */
   override def visitTableValuedFunction(ctx: TableValuedFunctionContext)
@@ -1556,7 +1581,8 @@ class AstBuilder extends SqlBaseParserBaseVisitor[AnyRef] with SQLConfHelper wit
         throw QueryParsingErrors.invalidTableValuedFunctionNameError(ident, ctx)
       }
 
-      val tvf = UnresolvedTableValuedFunction(ident, func.expression.asScala.map(expression).toSeq)
+      val tvf = UnresolvedTableValuedFunction(
+        ident, func.functionTableArgument.asScala.map(visitFunctionTableArgument).toSeq)
 
       val tvfAliases = if (aliases.nonEmpty) UnresolvedTVFAliases(ident, tvf, aliases) else tvf
 
