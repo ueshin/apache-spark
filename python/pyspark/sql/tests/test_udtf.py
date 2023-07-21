@@ -14,7 +14,9 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 #
-
+import os
+import shutil
+import tempfile
 import unittest
 
 from typing import Iterator
@@ -27,6 +29,7 @@ from pyspark.errors import (
     PySparkTypeError,
     AnalysisException,
 )
+from pyspark.files import SparkFiles
 from pyspark.rdd import PythonEvalType
 from pyspark.sql.functions import (
     array,
@@ -1207,6 +1210,119 @@ class BaseUDTFTestsMixin:
             AnalysisException, r"analyze\(\) takes 0 positional arguments but 2 were given"
         ):
             self.spark.sql("SELECT * FROM test_udtf(1, 'x')").collect()
+
+    def _add_artifacts(self, path, pyfile=False, archive=False, file=False):
+        if pyfile:
+            self.spark.sparkContext.addPyFile(path)
+        elif archive:
+            self.spark.sparkContext.addArchive(path)
+        elif file:
+            self.spark.sparkContext.addFile(path)
+        else:
+            self.fail()
+
+    def test_udtf_with_analyze_using_pyfile(self):
+        with tempfile.TemporaryDirectory() as d:
+            pyfile_path = os.path.join(d, "my_pyfile.py")
+            with open(pyfile_path, "w") as f:
+                f.write("my_func = lambda: 'col1'")
+
+            self._add_artifacts(pyfile_path, pyfile=True)
+
+            @udtf
+            class TestUDTF:
+                @staticmethod
+                def analyze(a: AnalyzeArgument) -> AnalyzeResult:
+                    import my_pyfile
+
+                    return AnalyzeResult(StructType().add(my_pyfile.my_func(), a.data_type))
+
+                def eval(self, a):
+                    yield a,
+
+            df = TestUDTF(lit(10))
+            assertSchemaEqual(df.schema, StructType().add("col1", IntegerType()))
+            assertDataFrameEqual(df, [Row(col=10)])
+
+    def test_udtf_with_analyze_using_zipped_package(self):
+        with tempfile.TemporaryDirectory() as d:
+            package_path = os.path.join(d, "my_zipfile")
+            os.mkdir(package_path)
+            pyfile_path = os.path.join(package_path, "__init__.py")
+            with open(pyfile_path, "w") as f:
+                f.write("my_func = lambda: 'col1'")
+            shutil.make_archive(package_path, "zip", d, "my_zipfile")
+
+            self._add_artifacts(f"{package_path}.zip", pyfile=True)
+
+            @udtf
+            class TestUDTF:
+                @staticmethod
+                def analyze(a: AnalyzeArgument) -> AnalyzeResult:
+                    import my_zipfile
+
+                    return AnalyzeResult(StructType().add(my_zipfile.my_func(), a.data_type))
+
+                def eval(self, a):
+                    yield a,
+
+            df = TestUDTF(lit(10))
+            assertSchemaEqual(df.schema, StructType().add("col1", IntegerType()))
+            assertDataFrameEqual(df, [Row(col=10)])
+
+    def test_udtf_with_analyze_using_archive(self):
+        with tempfile.TemporaryDirectory() as d:
+            archive_path = os.path.join(d, "my_archive")
+            os.mkdir(archive_path)
+            pyfile_path = os.path.join(archive_path, "my_file.txt")
+            with open(pyfile_path, "w") as f:
+                f.write("col1")
+            shutil.make_archive(archive_path, "zip", d, "my_archive")
+
+            self._add_artifacts(f"{archive_path}.zip#my_files", archive=True)
+
+            @udtf
+            class TestUDTF:
+                @staticmethod
+                def analyze(a: AnalyzeArgument) -> AnalyzeResult:
+                    with open(
+                        os.path.join(
+                            SparkFiles.getRootDirectory(), "my_files", "my_archive", "my_file.txt"
+                        ),
+                        "r",
+                    ) as my_file:
+                        return AnalyzeResult(StructType().add(my_file.read().strip(), a.data_type))
+
+                def eval(self, a):
+                    yield a,
+
+            df = TestUDTF(lit(10))
+            assertSchemaEqual(df.schema, StructType().add("col1", IntegerType()))
+            assertDataFrameEqual(df, [Row(col=10)])
+
+    def test_udtf_with_analyze_using_file(self):
+        with tempfile.TemporaryDirectory() as d:
+            file_path = os.path.join(d, "my_file.txt")
+            with open(file_path, "w") as f:
+                f.write("col1")
+
+            self._add_artifacts(file_path, file=True)
+
+            @udtf
+            class TestUDTF:
+                @staticmethod
+                def analyze(a: AnalyzeArgument) -> AnalyzeResult:
+                    with open(
+                        os.path.join(SparkFiles.getRootDirectory(), "my_file.txt"), "r"
+                    ) as my_file:
+                        return AnalyzeResult(StructType().add(my_file.read().strip(), a.data_type))
+
+                def eval(self, a):
+                    yield a,
+
+            df = TestUDTF(lit(10))
+            assertSchemaEqual(df.schema, StructType().add("col1", IntegerType()))
+            assertDataFrameEqual(df, [Row(col=10)])
 
 
 class UDTFTests(BaseUDTFTestsMixin, ReusedSQLTestCase):

@@ -104,6 +104,9 @@ class UDTFParityTests(BaseUDTFTestsMixin, ReusedConnectTestCase):
         with self.assertRaisesRegex(SparkConnectGrpcException, err_msg):
             TestUDTF(lit(1)).show()
 
+    def _add_artifacts(self, path, pyfile=False, archive=False, file=False):
+        self.spark.addArtifacts(path, pyfile=pyfile, archive=archive, file=file)
+
 
 class ArrowUDTFParityTests(UDTFArrowTestsMixin, UDTFParityTests):
     @classmethod

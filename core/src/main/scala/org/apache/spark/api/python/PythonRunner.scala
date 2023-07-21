@@ -309,8 +309,9 @@ private[spark] abstract class BasePythonRunner[IN, OUT](
         val dataOut = new DataOutputStream(stream)
         // Partition index
         dataOut.writeInt(partitionIndex)
-        // Python version of driver
-        PythonRDD.writeUTF(pythonVer, dataOut)
+
+        PythonWorkerUtils.writePythonVersion(pythonVer, dataOut)
+
         // Init a ServerSocket to accept method calls from Python side.
         val isBarrier = context.isInstanceOf[BarrierTaskContext]
         if (isBarrier) {
@@ -406,16 +407,8 @@ private[spark] abstract class BasePythonRunner[IN, OUT](
           PythonRDD.writeUTF(v, dataOut)
         }
 
-        // sparkFilesDir
-        val root = jobArtifactUUID.map { uuid =>
-          new File(SparkFiles.getRootDirectory(), uuid).getAbsolutePath
-        }.getOrElse(SparkFiles.getRootDirectory())
-        PythonRDD.writeUTF(root, dataOut)
-        // Python includes (*.zip and *.egg files)
-        dataOut.writeInt(pythonIncludes.size)
-        for (include <- pythonIncludes) {
-          PythonRDD.writeUTF(include, dataOut)
-        }
+        PythonWorkerUtils.writeSparkFiles(jobArtifactUUID, pythonIncludes, dataOut)
+
         // Broadcast variables
         val oldBids = PythonRDD.getWorkerBroadcasts(worker)
         val newBids = broadcastVars.map(_.id).toSet
@@ -524,9 +517,7 @@ private[spark] abstract class BasePythonRunner[IN, OUT](
     }
 
     def writeUTF(str: String, dataOut: DataOutputStream): Unit = {
-      val bytes = str.getBytes(UTF_8)
-      dataOut.writeInt(bytes.length)
-      dataOut.write(bytes)
+      PythonWorkerUtils.writeUTF(str, dataOut)
     }
   }
 

@@ -22,7 +22,6 @@ import os
 import sys
 import time
 from inspect import currentframe, getframeinfo, getfullargspec
-import importlib
 import json
 from typing import Iterator
 
@@ -40,7 +39,6 @@ from pyspark.accumulators import _accumulatorRegistry
 from pyspark.broadcast import Broadcast, _broadcastRegistry
 from pyspark.java_gateway import local_connect_and_auth
 from pyspark.taskcontext import BarrierTaskContext, TaskContext
-from pyspark.files import SparkFiles
 from pyspark.resource import ResourceInformation
 from pyspark.rdd import PythonEvalType
 from pyspark.serializers import (
@@ -67,9 +65,13 @@ from pyspark.sql.types import StructType, _parse_datatype_json_string
 from pyspark.util import fail_on_stopiteration, try_simplify_traceback
 from pyspark import shuffle
 from pyspark.errors import PySparkRuntimeError, PySparkTypeError
-
-pickleSer = CPickleSerializer()
-utf8_deserializer = UTF8Deserializer()
+from pyspark.worker_util import (
+    check_python_version,
+    read_command,
+    pickleSer,
+    setup_spark_files,
+    utf8_deserializer,
+)
 
 
 def report_times(outfile, boot, init, finish):
@@ -77,20 +79,6 @@ def report_times(outfile, boot, init, finish):
     write_long(int(1000 * boot), outfile)
     write_long(int(1000 * init), outfile)
     write_long(int(1000 * finish), outfile)
-
-
-def add_path(path):
-    # worker can be used, so do not add path multiple times
-    if path not in sys.path:
-        # overwrite system packages
-        sys.path.insert(1, path)
-
-
-def read_command(serializer, file):
-    command = serializer._read_with_length(file)
-    if isinstance(command, Broadcast):
-        command = serializer.loads(command.value)
-    return command
 
 
 def chain(f, g):
@@ -970,21 +958,6 @@ def read_udfs(pickleSer, infile, eval_type):
     return func, None, ser, ser
 
 
-def check_python_version(infile):
-    """
-    Check the Python version between the running process and the one used to serialize the command.
-    """
-    version = utf8_deserializer.loads(infile)
-    if version != "%d.%d" % sys.version_info[:2]:
-        raise PySparkRuntimeError(
-            error_class="PYTHON_VERSION_MISMATCH",
-            message_parameters={
-                "worker_version": str(sys.version_info[:2]),
-                "driver_version": str(version),
-            },
-        )
-
-
 def main(infile, outfile):
     faulthandler_log_path = os.environ.get("PYTHON_FAULTHANDLER_DIR", None)
     try:
@@ -1074,19 +1047,7 @@ def main(infile, outfile):
         shuffle.DiskBytesSpilled = 0
         _accumulatorRegistry.clear()
 
-        # fetch name of workdir
-        spark_files_dir = utf8_deserializer.loads(infile)
-        SparkFiles._root_directory = spark_files_dir
-        SparkFiles._is_running_on_worker = True
-
-        # fetch names of includes (*.zip and *.egg files) and construct PYTHONPATH
-        add_path(spark_files_dir)  # *.py files that were added will be copied here
-        num_python_includes = read_int(infile)
-        for _ in range(num_python_includes):
-            filename = utf8_deserializer.loads(infile)
-            add_path(os.path.join(spark_files_dir, filename))
-
-        importlib.invalidate_caches()
+        setup_spark_files(infile)
 
         # fetch names and values of broadcast variables
         needs_broadcast_decryption_server = read_bool(infile)

@@ -33,7 +33,13 @@ from pyspark.serializers import (
 from pyspark.sql.types import _parse_datatype_json_string
 from pyspark.sql.udtf import AnalyzeArgument, AnalyzeResult
 from pyspark.util import try_simplify_traceback
-from pyspark.worker import check_python_version, read_command, pickleSer, utf8_deserializer
+from pyspark.worker_util import (
+    check_python_version,
+    read_command,
+    pickleSer,
+    setup_spark_files,
+    utf8_deserializer,
+)
 
 
 def read_udtf(infile: IO) -> type:
@@ -87,6 +93,8 @@ def main(infile: IO, outfile: IO) -> None:
     """
     try:
         check_python_version(infile)
+        setup_spark_files(infile)
+
         handler = read_udtf(infile)
         args = read_arguments(infile)
 
