@@ -25,7 +25,7 @@ import org.apache.spark.{SparkEnv, TaskContext}
 import org.apache.spark.rdd.RDD
 import org.apache.spark.sql.catalyst.InternalRow
 import org.apache.spark.sql.catalyst.expressions._
-import org.apache.spark.sql.execution.UnaryExecNode
+import org.apache.spark.sql.execution.{GroupedIterator, UnaryExecNode}
 import org.apache.spark.sql.execution.python.EvalPythonExec.ArgumentMetadata
 import org.apache.spark.sql.types.{DataType, StructField, StructType}
 import org.apache.spark.util.Utils
@@ -68,12 +68,24 @@ trait EvalPythonUDTFExec extends UnaryExecNode {
       // flatten all the arguments
       val allInputs = new ArrayBuffer[Expression]
       val dataTypes = new ArrayBuffer[DataType]
-      val argMetas = udtf.children.map { e =>
-        val (key, value) = e match {
+      val argMetas = udtf.children.zipWithIndex.map { case (e, i) =>
+        val (key, v) = e match {
           case NamedArgumentExpression(key, value) =>
             (Some(key), value)
           case _ =>
             (None, e)
+        }
+        val value = udtf.pythonUDTFPartitionColumnIndexes match {
+          case Some(PythonUDTFPartitionColumnIndexes(t, indexes)) if t == i =>
+            // Drop columns unnecessary in Python worker.
+            assert(v.dataType.isInstanceOf[StructType])
+            CreateNamedStruct(
+              v.dataType.asInstanceOf[StructType].zipWithIndex
+                .flatMap {
+                  case (_, i) if indexes.contains(i) => Seq.empty
+                  case (field, i) => Seq(Literal(field.name), GetStructField(v, i))
+                })
+          case _ => v
         }
         if (allInputs.exists(_.semanticEquals(value))) {
           ArgumentMetadata(allInputs.indexWhere(_.semanticEquals(value)), key)
@@ -89,49 +101,57 @@ trait EvalPythonUDTFExec extends UnaryExecNode {
         StructField(s"_$i", dt)
       }.toArray)
 
-      // Add rows to the queue to join later with the result.
-      // Also keep track of the number rows added to the queue.
-      // This is needed to process extra output rows from the `terminate()` call of the UDTF.
-      var count = 0L
-      val projectedRowIter = iter.map { inputRow =>
-        queue.add(inputRow.asInstanceOf[UnsafeRow])
-        count += 1
-        projection(inputRow)
-      }
+      val groupedIter = udtf.pythonUDTFPartitionColumnIndexes.map {
+        case PythonUDTFPartitionColumnIndexes(t, indexes) =>
+          GroupedIterator(iter, indexes.map(GetStructField(child.output(t), _)), child.output)
+            .map(_._2)
+      }.getOrElse(Iterator(iter))
 
-      val outputRowIterator = evaluate(argMetas, projectedRowIter, schema, context)
-
-      val pruneChildForResult: InternalRow => InternalRow =
-        if (child.outputSet == AttributeSet(requiredChildOutput)) {
-          identity
-        } else {
-          UnsafeProjection.create(requiredChildOutput, child.output)
+      groupedIter.flatMap { iterPerPartition =>
+        // Add rows to the queue to join later with the result.
+        // Also keep track of the number rows added to the queue.
+        // This is needed to process extra output rows from the `terminate()` call of the UDTF.
+        var count = 0L
+        val projectedRowIter = iterPerPartition.map { inputRow =>
+          queue.add(inputRow.asInstanceOf[UnsafeRow])
+          count += 1
+          projection(inputRow)
         }
 
-      val joined = new JoinedRow
-      val nullRow = new GenericInternalRow(udtf.elementSchema.length)
-      val resultProj = UnsafeProjection.create(output, output)
+        val outputRowIterator = evaluate(argMetas, projectedRowIter, schema, context)
 
-      outputRowIterator.flatMap { outputRows =>
-        // If `count` is greater than zero, it means there are remaining input rows in the queue.
-        // In this case, the output rows of the UDTF are joined with the corresponding input row
-        // in the queue.
-        if (count > 0) {
-          val left = queue.remove()
-          count -= 1
-          joined.withLeft(pruneChildForResult(left))
-        }
-        // If `count` is zero, it means all input rows have been consumed. Any additional rows
-        // from the UDTF are from the `terminate()` call. We leave the left side as the last
-        // element of its child output to keep it consistent with the Generate implementation
-        // and Hive UDTFs.
-        outputRows.map { r =>
-          // When the UDTF's result is None, such as `def eval(): yield`,
-          // we join it with a null row to avoid NullPointerException.
-          if (r == null) {
-            resultProj(joined.withRight(nullRow))
+        val pruneChildForResult: InternalRow => InternalRow =
+          if (child.outputSet == AttributeSet(requiredChildOutput)) {
+            identity
           } else {
-            resultProj(joined.withRight(r))
+            UnsafeProjection.create(requiredChildOutput, child.output)
+          }
+
+        val joined = new JoinedRow
+        val nullRow = new GenericInternalRow(udtf.elementSchema.length)
+        val resultProj = UnsafeProjection.create(output, output)
+
+        outputRowIterator.flatMap { outputRows =>
+          // If `count` is greater than zero, it means there are remaining input rows in the queue.
+          // In this case, the output rows of the UDTF are joined with the corresponding input row
+          // in the queue.
+          if (count > 0) {
+            val left = queue.remove()
+            count -= 1
+            joined.withLeft(pruneChildForResult(left))
+          }
+          // If `count` is zero, it means all input rows have been consumed. Any additional rows
+          // from the UDTF are from the `terminate()` call. We leave the left side as the last
+          // element of its child output to keep it consistent with the Generate implementation
+          // and Hive UDTFs.
+          outputRows.map { r =>
+            // When the UDTF's result is None, such as `def eval(): yield`,
+            // we join it with a null row to avoid NullPointerException.
+            if (r == null) {
+              resultProj(joined.withRight(nullRow))
+            } else {
+              resultProj(joined.withRight(r))
+            }
           }
         }
       }

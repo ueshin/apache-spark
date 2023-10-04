@@ -197,7 +197,8 @@ case class PythonUDTF(
  * Holds the indexes of the TABLE argument to a Python UDTF call, if applicable.
  * @param partitionChildIndexes The indexes of the partitioning columns in each TABLE argument.
  */
-case class PythonUDTFPartitionColumnIndexes(partitionChildIndexes: Seq[Int])
+case class PythonUDTFPartitionColumnIndexes(
+  tableArgumentIndex: Int, partitionChildIndexes: Seq[Int])
 
 /**
  * A placeholder of a polymorphic Python table-valued function.

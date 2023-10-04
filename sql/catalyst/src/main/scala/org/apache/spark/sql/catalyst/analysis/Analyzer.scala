@@ -2135,15 +2135,16 @@ class Analyzer(override val catalogManager: CatalogManager) extends RuleExecutor
       case p: LogicalPlan
           if p.resolved && p.containsPattern(FUNCTION_TABLE_RELATION_ARGUMENT_EXPRESSION) =>
         withPosition(p) {
-          val tableArgs =
-            mutable.ArrayBuffer.empty[(FunctionTableSubqueryArgumentExpression, LogicalPlan)]
+          val tableArgs = mutable.ArrayBuffer
+            .empty[(FunctionTableSubqueryArgumentExpression, LogicalPlan, Expression)]
 
-          val tvf = p.transformExpressionsWithPruning(
+          val tvf = p.transformExpressionsUpWithPruning(
             _.containsPattern(FUNCTION_TABLE_RELATION_ARGUMENT_EXPRESSION)) {
             case t: FunctionTableSubqueryArgumentExpression =>
               val alias = SubqueryAlias.generateSubqueryName(s"_${tableArgs.size}")
-              tableArgs.append((t, SubqueryAlias(alias, t.evaluable)))
-              UnresolvedAttribute(Seq(alias, "c"))
+              val outerAttr = UnresolvedAttribute(Seq(alias, "c"))
+              tableArgs.append((t, SubqueryAlias(alias, t.evaluable), outerAttr))
+              outerAttr
           }
 
           assert(tableArgs.nonEmpty)
@@ -2157,8 +2158,13 @@ class Analyzer(override val catalogManager: CatalogManager) extends RuleExecutor
           val tvfWithTableColumnIndexes = tvf match {
             case g @ Generate(pyudtf: PythonUDTF, _, _, _, _, _)
                 if tableArgs.head._1.partitioningExpressionIndexes.nonEmpty =>
-              val partitionColumnIndexes =
-                PythonUDTFPartitionColumnIndexes(tableArgs.head._1.partitioningExpressionIndexes)
+              val tableArgumentIndex = pyudtf.children.map {
+                case NamedArgumentExpression(_, value) => value
+                case value => value
+              }.indexOf(tableArgs.head._3)
+              assert(tableArgumentIndex >= 0)
+              val partitionColumnIndexes = PythonUDTFPartitionColumnIndexes(
+                tableArgumentIndex, tableArgs.head._1.partitioningExpressionIndexes)
               g.copy(generator = pyudtf.copy(
                 pythonUDTFPartitionColumnIndexes = Some(partitionColumnIndexes)))
             case _ => tvf

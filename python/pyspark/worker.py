@@ -23,7 +23,7 @@ import sys
 import time
 from inspect import getfullargspec
 import json
-from typing import Any, Callable, Iterable, Iterator
+from typing import Any, Iterable, Iterator
 
 import faulthandler
 
@@ -53,10 +53,8 @@ from pyspark.sql.pandas.serializers import (
 from pyspark.sql.pandas.types import to_arrow_type
 from pyspark.sql.types import (
     BinaryType,
-    Row,
     StringType,
     StructType,
-    _create_row,
     _parse_datatype_json_string,
 )
 from pyspark.util import fail_on_stopiteration, handle_worker_exception
@@ -678,8 +676,6 @@ def read_udtf(pickleSer, infile, eval_type):
             kwargs_offsets[name] = offset
         else:
             args_offsets.append(offset)
-    num_partition_child_indexes = read_int(infile)
-    partition_child_indexes = [read_int(infile) for i in range(num_partition_child_indexes)]
     handler = read_command(pickleSer, infile)
     if not isinstance(handler, type):
         raise PySparkRuntimeError(
@@ -693,105 +689,9 @@ def read_udtf(pickleSer, infile, eval_type):
             f"The return type of a UDTF must be a struct type, but got {type(return_type)}."
         )
 
-    class UDTFWithPartitions:
-        """
-        This implements the logic of a UDTF that accepts an input TABLE argument with one or more
-        PARTITION BY expressions.
-
-        For example, let's assume we have a table like:
-            CREATE TABLE t (c1 INT, c2 INT) USING delta;
-        Then for the following queries:
-            SELECT * FROM my_udtf(TABLE (t) PARTITION BY c1, c2);
-            The partition_child_indexes will be: 0, 1.
-            SELECT * FROM my_udtf(TABLE (t) PARTITION BY c1, c2 + 4);
-            The partition_child_indexes will be: 0, 2 (where we add a projection for "c2 + 4").
-        """
-
-        def __init__(self, create_udtf: Callable, partition_child_indexes: list):
-            """
-            Creates a new instance of this class to wrap the provided UDTF with another one that
-            checks the values of projected partitioning expressions on consecutive rows to figure
-            out when the partition boundaries change.
-
-            Parameters
-            ----------
-            create_udtf: function
-                Function to create a new instance of the UDTF to be invoked.
-            partition_child_indexes: list
-                List of integers identifying zero-based indexes of the columns of the input table
-                that contain projected partitioning expressions. This class will inspect these
-                values for each pair of consecutive input rows. When they change, this indicates
-                the boundary between two partitions, and we will invoke the 'terminate' method on
-                the UDTF class instance and then destroy it and create a new one to implement the
-                desired partitioning semantics.
-            """
-            self._create_udtf: Callable = create_udtf
-            self._udtf = create_udtf()
-            self._prev_arguments: list = list()
-            self._partition_child_indexes: list = partition_child_indexes
-
-        def eval(self, *args, **kwargs) -> Iterator:
-            changed_partitions = self._check_partition_boundaries(
-                list(args) + list(kwargs.values())
-            )
-            if changed_partitions:
-                if self._udtf.terminate is not None:
-                    result = self._udtf.terminate()
-                    if result is not None:
-                        for row in result:
-                            yield row
-                self._udtf = self._create_udtf()
-            if self._udtf.eval is not None:
-                # Filter the arguments to exclude projected PARTITION BY values added by Catalyst.
-                filtered_args = [self._remove_partition_by_exprs(arg) for arg in args]
-                filtered_kwargs = {
-                    key: self._remove_partition_by_exprs(value) for (key, value) in kwargs.items()
-                }
-                result = self._udtf.eval(*filtered_args, **filtered_kwargs)
-                if result is not None:
-                    for row in result:
-                        yield row
-
-        def terminate(self) -> Iterator:
-            if self._udtf.terminate is not None:
-                return self._udtf.terminate()
-            return iter(())
-
-        def _check_partition_boundaries(self, arguments: list) -> bool:
-            result = False
-            if len(self._prev_arguments) > 0:
-                cur_table_arg = self._get_table_arg(arguments)
-                prev_table_arg = self._get_table_arg(self._prev_arguments)
-                cur_partitions_args = []
-                prev_partitions_args = []
-                for i in self._partition_child_indexes:
-                    cur_partitions_args.append(cur_table_arg[i])
-                    prev_partitions_args.append(prev_table_arg[i])
-                result = any(k != v for k, v in zip(cur_partitions_args, prev_partitions_args))
-            self._prev_arguments = arguments
-            return result
-
-        def _get_table_arg(self, inputs: list) -> Row:
-            return [x for x in inputs if type(x) is Row][0]
-
-        def _remove_partition_by_exprs(self, arg: Any) -> Any:
-            if isinstance(arg, Row):
-                new_row_keys = []
-                new_row_values = []
-                for i, (key, value) in enumerate(zip(arg.__fields__, arg)):
-                    if i not in self._partition_child_indexes:
-                        new_row_keys.append(key)
-                        new_row_values.append(value)
-                return _create_row(new_row_keys, new_row_values)
-            else:
-                return arg
-
     # Instantiate the UDTF class.
     try:
-        if len(partition_child_indexes) > 0:
-            udtf = UDTFWithPartitions(handler, partition_child_indexes)
-        else:
-            udtf = handler()
+        udtf = handler()
     except Exception as e:
         raise PySparkRuntimeError(
             error_class="UDTF_EXEC_ERROR",
