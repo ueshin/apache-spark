@@ -18,7 +18,6 @@
 package org.apache.spark.sql.connect.execution
 
 import scala.concurrent.duration.Duration
-import scala.jdk.CollectionConverters._
 import scala.util.{Failure, Success}
 
 import com.google.protobuf.ByteString
@@ -30,7 +29,6 @@ import org.apache.spark.connect.proto.ExecutePlanResponse
 import org.apache.spark.sql.{DataFrame, Dataset}
 import org.apache.spark.sql.catalyst.InternalRow
 import org.apache.spark.sql.connect.common.DataTypeProtoConverter
-import org.apache.spark.sql.connect.common.LiteralValueProtoConverter.toLiteralProto
 import org.apache.spark.sql.connect.config.Connect.CONNECT_GRPC_ARROW_MAX_BATCH_SIZE
 import org.apache.spark.sql.connect.planner.SparkConnectPlanner
 import org.apache.spark.sql.connect.service.ExecuteHolder
@@ -67,9 +65,6 @@ private[execution] class SparkConnectPlanExecution(executeHolder: ExecuteHolder)
     processAsArrowBatches(dataframe, responseObserver, executeHolder)
     responseObserver.onNext(
       MetricGenerator.createMetricsResponse(request.getSessionId, dataframe))
-    if (dataframe.queryExecution.observedMetrics.nonEmpty) {
-      responseObserver.onNext(createObservedMetricsResponse(request.getSessionId, dataframe))
-    }
   }
 
   type Batch = (Array[Byte], Long)
@@ -236,28 +231,6 @@ private[execution] class SparkConnectPlanExecution(executeHolder: ExecuteHolder)
       .newBuilder()
       .setSessionId(sessionId)
       .setSchema(DataTypeProtoConverter.toConnectProtoType(schema))
-      .build()
-  }
-
-  private def createObservedMetricsResponse(
-      sessionId: String,
-      dataframe: DataFrame): ExecutePlanResponse = {
-    val observedMetrics = dataframe.queryExecution.observedMetrics.map { case (name, row) =>
-      val cols = (0 until row.length).map(i => toLiteralProto(row(i)))
-      val metrics = ExecutePlanResponse.ObservedMetrics
-        .newBuilder()
-        .setName(name)
-        .addAllValues(cols.asJava)
-      if (row.schema != null) {
-        metrics.addAllKeys(row.schema.fieldNames.toList.asJava)
-      }
-      metrics.build()
-    }
-    // Prepare a response with the observed metrics.
-    ExecutePlanResponse
-      .newBuilder()
-      .setSessionId(sessionId)
-      .addAllObservedMetrics(observedMetrics.asJava)
       .build()
   }
 }

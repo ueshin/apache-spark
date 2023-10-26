@@ -58,6 +58,7 @@ import org.apache.spark.sql.catalyst.streaming.InternalOutputModes
 import org.apache.spark.sql.catalyst.types.DataTypeUtils
 import org.apache.spark.sql.catalyst.util.{CaseInsensitiveMap, CharVarcharUtils}
 import org.apache.spark.sql.connect.common.{DataTypeProtoConverter, ForeachWriterPacket, InvalidPlanInput, LiteralValueProtoConverter, StorageLevelProtoConverter, StreamingListenerPacket, UdfPacket}
+import org.apache.spark.sql.connect.common.LiteralValueProtoConverter.toLiteralProto
 import org.apache.spark.sql.connect.config.Connect.CONNECT_GRPC_ARROW_MAX_BATCH_SIZE
 import org.apache.spark.sql.connect.plugin.SparkConnectPluginRegistry
 import org.apache.spark.sql.connect.service.{ExecuteHolder, SessionHolder, SparkConnectService}
@@ -77,7 +78,7 @@ import org.apache.spark.sql.internal.{CatalogImpl, TypedAggUtils}
 import org.apache.spark.sql.protobuf.{CatalystDataToProtobuf, ProtobufDataToCatalyst}
 import org.apache.spark.sql.streaming.{GroupStateTimeout, OutputMode, StreamingQuery, StreamingQueryListener, StreamingQueryProgress, Trigger}
 import org.apache.spark.sql.types._
-import org.apache.spark.sql.util.CaseInsensitiveStringMap
+import org.apache.spark.sql.util.{CaseInsensitiveStringMap, QueryExecutionListener}
 import org.apache.spark.storage.CacheId
 import org.apache.spark.util.Utils
 
@@ -1065,11 +1066,49 @@ class SparkConnectPlanner(
   }
 
   private def transformCollectMetrics(rel: proto.CollectMetrics, planId: Long): LogicalPlan = {
+    val metric_name = rel.getName
     val metrics = rel.getMetricsList.asScala.toSeq.map { expr =>
       Column(transformExpression(expr))
     }
 
-    CollectMetrics(rel.getName, metrics.map(_.named), transformRelation(rel.getInput), planId)
+    executeHolderOpt.foreach { executeHolder =>
+      val listener = new QueryExecutionListener {
+        override def onSuccess(funcName: String, qe: QueryExecution, durationNs: Long): Unit = {
+          if (qe.logical.exists {
+            case CollectMetrics(name, _, _, dataframeId) =>
+              name == metric_name && dataframeId == planId
+            case _ => false
+          }) {
+            qe.observedMetrics.get(metric_name).foreach { row =>
+              val cols = (0 until row.length).map(i => toLiteralProto(row(i)))
+              val observedMetrics = ExecutePlanResponse.ObservedMetrics
+                .newBuilder()
+                .setName(metric_name)
+                .addAllValues(cols.asJava)
+              if (row.schema != null) {
+                observedMetrics.addAllKeys(row.schema.fieldNames.toList.asJava)
+              }
+
+              // Prepare a response with the observed metrics.
+              val response = ExecutePlanResponse
+                .newBuilder()
+                .setSessionId(sessionId)
+                .addObservedMetrics(observedMetrics)
+                .build()
+              executeHolder.responseObserver.onNext(response)
+            }
+            sessionHolder.session.listenerManager.unregister(this)
+          }
+        }
+
+        override def onFailure(funcName: String, qe: QueryExecution, exception: Exception): Unit = {
+          sessionHolder.session.listenerManager.unregister(this)
+        }
+      }
+      sessionHolder.session.listenerManager.register(listener)
+    }
+
+    CollectMetrics(metric_name, metrics.map(_.named), transformRelation(rel.getInput), planId)
   }
 
   private def transformDeduplicate(rel: proto.Deduplicate): LogicalPlan = {
