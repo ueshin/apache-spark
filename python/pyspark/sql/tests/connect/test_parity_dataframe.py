@@ -30,6 +30,9 @@ class DataFrameParityTests(DataFrameTestsMixin, ReusedConnectTestCase):
     def test_toDF_with_schema_string(self):
         super().test_toDF_with_schema_string()
 
+    def test_test(self):
+        self.failIf(False, "This test should not fail.")
+
 
 if __name__ == "__main__":
     import unittest
