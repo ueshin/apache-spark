@@ -652,7 +652,12 @@ class InternalFrame:
                 data_spark_columns = [
                     scol_for(spark_frame, field.name) for field in base_schema.fields[1:]
                 ]
-                if data_fields is None:
+                if data_fields is not None:
+                    data_fields = [
+                        field.copy(name=struct_field.name)
+                        for field, struct_field in zip(data_fields, base_schema.fields[1:])
+                    ]
+                else:
                     data_fields = [
                         InternalField.from_struct_field(field) for field in base_schema.fields[1:]
                     ]
