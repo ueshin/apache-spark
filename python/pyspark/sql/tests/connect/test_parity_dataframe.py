@@ -34,6 +34,9 @@ class DataFrameParityTests(DataFrameTestsMixin, ReusedConnectTestCase):
     def test_df_merge_into(self):
         super().test_df_merge_into()
 
+    def test_test(self):
+        self.failIf(False, "This test should not fail.")
+
 
 if __name__ == "__main__":
     import unittest
