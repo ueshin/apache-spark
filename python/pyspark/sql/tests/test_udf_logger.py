@@ -47,41 +47,44 @@ class UDFLoggerTestsMixin:
             logger.info(f"This is a log message: {x}", b="xyz")
             return str(logger.manager)
 
-        self.spark.range(2).select(
-            udf1(sf.col("id")).alias("udf1"), udf2(sf.col("id")).alias("udf2")
-        ).collect()
+        df = self.spark.range(2).select(
+            udf1(sf.col("id")).alias("udf1_1"),
+            udf2(sf.col("id")).alias("udf2"),
+            udf1(sf.col("id") * 1).alias("udf1_2"),
+        )
+        df.collect()
 
-        self.assertEqual(2, len(self.udf_logs), str(list(self.udf_logs)))
+        self.assertEqual(3, len(self.udf_logs), str(list(self.udf_logs)))
 
-        for id in self.udf_logs:
-            logs = self.spark.udfLogs.collect(id)
-            self.assertEqual(2, len(logs))
+        udf1_1_id, udf2_id, udf1_2_id = sorted(self.udf_logs)
 
-        udf1_id = min(self.udf_logs)
-        udf2_id = max(self.udf_logs)
-
-        for id, level, context in [
-            (udf1_id, "WARNING", {"a": "123"}),
-            (udf2_id, "INFO", {"b": "xyz"}),
+        for name, id, level, context in [
+            ("udf1_1_id", udf1_1_id, "WARNING", {"a": "123"}),
+            ("udf2_id", udf2_id, "INFO", {"b": "xyz"}),
+            ("udf1_2_id", udf1_2_id, "WARNING", {"a": "123"}),
         ]:
-            logs_df = self.spark.udfLogs.collectAsDataFrame(id)
-            assertDataFrameEqual(
-                logs_df.select("level", "logger", "msg", "context"),
-                [
-                    Row(
-                        level=level,
-                        logger="PySparkUDFLogger",
-                        msg="This is a log message: 0",
-                        context=context,
-                    ),
-                    Row(
-                        level=level,
-                        logger="PySparkUDFLogger",
-                        msg="This is a log message: 1",
-                        context=context,
-                    ),
-                ],
-            )
+            with self.subTest(name=name):
+                logs = self.spark.udfLogs.collect(id)
+                self.assertEqual(2, len(logs))
+
+                logs_df = self.spark.udfLogs.collectAsDataFrame(id)
+                assertDataFrameEqual(
+                    logs_df.select("level", "logger", "msg", "context"),
+                    [
+                        Row(
+                            level=level,
+                            logger="PySparkUDFLogger",
+                            msg="This is a log message: 0",
+                            context=context,
+                        ),
+                        Row(
+                            level=level,
+                            logger="PySparkUDFLogger",
+                            msg="This is a log message: 1",
+                            context=context,
+                        ),
+                    ],
+                )
 
 
 class UDFLoggerTests(UDFLoggerTestsMixin, ReusedSQLTestCase):
