@@ -64,7 +64,56 @@ class JSONFormatter(logging.Formatter):
         return json.dumps(log_entry, ensure_ascii=False)
 
 
-class PySparkLogger(logging.Logger):
+class PySparkLoggerBase(logging.Logger):
+    def info(self, msg: object, *args: object, **kwargs: object) -> None:
+        """
+        Log 'msg % args' with severity 'INFO' in structured JSON format.
+
+        Parameters
+        ----------
+        msg : str
+            The log message.
+        """
+        super().info(msg, *args, extra={"kwargs": kwargs})
+
+    def warning(self, msg: object, *args: object, **kwargs: object) -> None:
+        """
+        Log 'msg % args' with severity 'WARNING' in structured JSON format.
+
+        Parameters
+        ----------
+        msg : str
+            The log message.
+        """
+        super().warning(msg, *args, extra={"kwargs": kwargs})
+
+    def error(self, msg: object, *args: object, **kwargs: object) -> None:
+        """
+        Log 'msg % args' with severity 'ERROR' in structured JSON format.
+
+        Parameters
+        ----------
+        msg : str
+            The log message.
+        """
+        super().error(msg, *args, extra={"kwargs": kwargs})
+
+    def exception(self, msg: object, *args: object, **kwargs: object) -> None:
+        """
+        Convenience method for logging an ERROR with exception information.
+
+        Parameters
+        ----------
+        msg : str
+            The log message.
+        exc_info : bool = True
+            If True, exception information is added to the logging message.
+            This includes the exception type, value, and traceback. Default is True.
+        """
+        super().error(msg, *args, exc_info=True, extra={"kwargs": kwargs})
+
+
+class PySparkLogger(PySparkLoggerBase):
     """
     Custom logging.Logger wrapper for PySpark that logs messages in a structured JSON format.
 
@@ -147,50 +196,3 @@ class PySparkLogger(logging.Logger):
         logging.setLoggerClass(existing_logger)
 
         return cast(PySparkLogger, pyspark_logger)
-
-    def info(self, msg: object, *args: object, **kwargs: object) -> None:
-        """
-        Log 'msg % args' with severity 'INFO' in structured JSON format.
-
-        Parameters
-        ----------
-        msg : str
-            The log message.
-        """
-        super().info(msg, *args, extra={"kwargs": kwargs})
-
-    def warning(self, msg: object, *args: object, **kwargs: object) -> None:
-        """
-        Log 'msg % args' with severity 'WARNING' in structured JSON format.
-
-        Parameters
-        ----------
-        msg : str
-            The log message.
-        """
-        super().warning(msg, *args, extra={"kwargs": kwargs})
-
-    def error(self, msg: object, *args: object, **kwargs: object) -> None:
-        """
-        Log 'msg % args' with severity 'ERROR' in structured JSON format.
-
-        Parameters
-        ----------
-        msg : str
-            The log message.
-        """
-        super().error(msg, *args, extra={"kwargs": kwargs})
-
-    def exception(self, msg: object, *args: object, **kwargs: object) -> None:
-        """
-        Convenience method for logging an ERROR with exception information.
-
-        Parameters
-        ----------
-        msg : str
-            The log message.
-        exc_info : bool = True
-            If True, exception information is added to the logging message.
-            This includes the exception type, value, and traceback. Default is True.
-        """
-        super().error(msg, *args, exc_info=True, extra={"kwargs": kwargs})

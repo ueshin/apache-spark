@@ -62,6 +62,7 @@ from pyspark.sql.types import (
     _from_numpy_type,
 )
 from pyspark.errors.exceptions.captured import install_exception_handler
+from pyspark.sql.udf_logger import AccumulatorUDFLogCollector, UDFLogs
 from pyspark.sql.utils import is_timestamp_ntz_preferred, to_str, try_remote_session_classmethod
 from pyspark.errors import PySparkValueError, PySparkTypeError, PySparkRuntimeError
 
@@ -660,6 +661,7 @@ class SparkSession(SparkConversionMixin):
             self._jvm.SparkSession.setActiveSession(self._jsparkSession)
 
         self._profiler_collector = AccumulatorProfilerCollector()
+        self._udf_log_collector = AccumulatorUDFLogCollector()
 
     def _repr_html_(self) -> str:
         return """
@@ -954,6 +956,23 @@ class SparkSession(SparkConversionMixin):
         Supports Spark Connect.
         """
         return Profile(self._profiler_collector)
+
+    @property
+    def udfLogs(self) -> UDFLogs:
+        """
+        Returns a :class:`UDFLogs` for UDF logging.
+
+        .. versionadded:: 4.0.0
+
+        Returns
+        -------
+        :class:`UDFLogs`
+
+        Notes
+        -----
+        Supports Spark Connect.
+        """
+        return UDFLogs(self, self._udf_log_collector)
 
     def range(
         self,

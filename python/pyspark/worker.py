@@ -70,6 +70,7 @@ from pyspark.sql.types import (
     _create_row,
     _parse_datatype_json_string,
 )
+from pyspark.sql.udf_logger import PySparkUDFLogger, UDFLogHandler
 from pyspark.util import fail_on_stopiteration, handle_worker_exception
 from pyspark import shuffle
 from pyspark.errors import PySparkRuntimeError, PySparkTypeError
@@ -770,6 +771,20 @@ def wrap_memory_profiler(f, result_id):
     return profiling_func
 
 
+def wrap_loggable_func(f, result_id):
+    if PySparkUDFLogger._udf_log_handler is None:
+        PySparkUDFLogger._udf_log_handler = UDFLogHandler()
+
+    def loggable_func(*args, **kwargs):
+        PySparkUDFLogger._udf_log_handler.result_id = result_id
+        try:
+            return f(*args, **kwargs)
+        finally:
+            PySparkUDFLogger._udf_log_handler.result_id = None
+
+    return loggable_func
+
+
 def read_single_udf(pickleSer, infile, eval_type, runner_conf, udf_index, profiler):
     num_arg = read_int(infile)
 
@@ -803,16 +818,15 @@ def read_single_udf(pickleSer, infile, eval_type, runner_conf, udf_index, profil
         else:
             chained_func = chain(chained_func, f)
 
-    if profiler == "perf":
-        result_id = read_long(infile)
+    result_id = read_long(infile)
 
+    if profiler == "perf":
         if _supports_profiler(eval_type):
             profiling_func = wrap_perf_profiler(chained_func, result_id)
         else:
             profiling_func = chained_func
 
     elif profiler == "memory":
-        result_id = read_long(infile)
         if _supports_profiler(eval_type) and has_memory_profiler:
             profiling_func = wrap_memory_profiler(chained_func, result_id)
         else:
@@ -820,15 +834,17 @@ def read_single_udf(pickleSer, infile, eval_type, runner_conf, udf_index, profil
     else:
         profiling_func = chained_func
 
+    loggable_func = wrap_loggable_func(profiling_func, result_id)
+
     if eval_type in (
         PythonEvalType.SQL_SCALAR_PANDAS_ITER_UDF,
         PythonEvalType.SQL_ARROW_BATCHED_UDF,
     ):
-        func = profiling_func
+        func = loggable_func
     else:
         # make sure StopIteration's raised in the user code are not ignored
         # when they are processed in a for loop, raise them as RuntimeError's instead
-        func = fail_on_stopiteration(profiling_func)
+        func = fail_on_stopiteration(loggable_func)
 
     # the last returnType will be the return type of UDF
     if eval_type == PythonEvalType.SQL_SCALAR_PANDAS_UDF:

@@ -93,6 +93,7 @@ from pyspark.sql.types import (
     MapType,
     StringType,
 )
+from pyspark.sql.udf_logger import UDFLogCollector, UDFLogs
 from pyspark.sql.utils import to_str
 from pyspark.errors import (
     PySparkAttributeError,
@@ -1078,6 +1079,16 @@ class SparkSession:
         return Profile(self._client._profiler_collector)
 
     profile.__doc__ = PySparkSession.profile.__doc__
+
+    @property
+    def _udf_log_collector(self) -> UDFLogCollector:
+        return self._client._udf_log_collector
+
+    @property
+    def udfLogs(self) -> UDFLogs:
+        return UDFLogs(self, self._client._udf_log_collector)  # type: ignore[arg-type]
+
+    udfLogs.__doc__ = PySparkSession.udfLogs.__doc__
 
     def __reduce__(self) -> Tuple:
         """

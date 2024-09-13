@@ -59,6 +59,7 @@ def _deserialize_accumulator(
 
 class SpecialAccumulatorIds:
     SQL_UDF_PROFIER = -1
+    SQL_UDF_LOGGER = -2
 
 
 class Accumulator(Generic[T]):
