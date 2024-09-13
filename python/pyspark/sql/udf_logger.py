@@ -43,6 +43,8 @@ if TYPE_CHECKING:
 
 Logs = Dict[int, List[str]]
 
+__all__ = ["PySparkUDFLogger"]
+
 
 class _LogsParam(AccumulatorParam[Logs]):
     @staticmethod
@@ -63,7 +65,7 @@ LogsParam = _LogsParam()
 
 
 class UDFLogHandler(logging.Handler):
-    def __init__(self) -> None:
+    def __init__(self, result_id: int) -> None:
         super().__init__()
         self._accumulator = _deserialize_accumulator(
             SpecialAccumulatorIds.SQL_UDF_LOGGER, LogsParam.zero({}), LogsParam
@@ -72,43 +74,25 @@ class UDFLogHandler(logging.Handler):
         formatter.default_msec_format = "%s.%03d"
         self._formatter = formatter
 
-        self._result_id: Optional[int] = None
+        self._result_id = result_id
 
     def emit(self, record: logging.LogRecord) -> None:
-        if self.result_id is not None:
+        if self._result_id is not None:
             msg = self._formatter.format(record)
-            self._accumulator.add({self.result_id: [msg]})
-
-    @property
-    def result_id(self) -> Optional[int]:
-        return self._result_id
-
-    @result_id.setter
-    def result_id(self, id: Optional[int]) -> None:
-        assert id is None or self._result_id is None, f"Result ID is already set: {self._result_id}"
-        self._result_id = id
+            self._accumulator.add({self._result_id: [msg]})
 
 
 class PySparkUDFLogger(PySparkLoggerBase):
-    _udf_log_handler: ClassVar[Optional[UDFLogHandler]] = None
+    _result_id: ClassVar[Optional[int]] = None
 
-    def __init__(self, name: str):
-        super().__init__(name, level=logging.WARN)
+    def __init__(self, name: Optional[str] = None):
+        super().__init__(name or "PySparkUDFLogger", level=logging.WARN)
+        if self._result_id is not None:
+            self.addHandler(UDFLogHandler(self._result_id))
 
     @staticmethod
-    def getLogger(name: str = "PySparkUDFLogger") -> "PySparkUDFLogger":
-        existing_logger = logging.getLoggerClass()
-        try:
-            if not isinstance(existing_logger, PySparkUDFLogger):
-                logging.setLoggerClass(PySparkUDFLogger)
-
-            udf_logger = logging.getLogger(name)
-            if PySparkUDFLogger._udf_log_handler is not None:
-                udf_logger.addHandler(PySparkUDFLogger._udf_log_handler)
-        finally:
-            logging.setLoggerClass(existing_logger)
-
-        return cast(PySparkUDFLogger, udf_logger)
+    def getLogger(name: Optional[str] = None) -> "PySparkUDFLogger":
+        return PySparkUDFLogger(name)
 
 
 class UDFLogCollector(ABC):

@@ -772,15 +772,12 @@ def wrap_memory_profiler(f, result_id):
 
 
 def wrap_loggable_func(f, result_id):
-    if PySparkUDFLogger._udf_log_handler is None:
-        PySparkUDFLogger._udf_log_handler = UDFLogHandler()
-
     def loggable_func(*args, **kwargs):
-        PySparkUDFLogger._udf_log_handler.result_id = result_id
+        PySparkUDFLogger._result_id = result_id
         try:
             return f(*args, **kwargs)
         finally:
-            PySparkUDFLogger._udf_log_handler.result_id = None
+            PySparkUDFLogger._result_id = None
 
     return loggable_func
 
