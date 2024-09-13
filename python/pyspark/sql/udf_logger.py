@@ -152,6 +152,19 @@ class UDFLogs:
         self._sparkSession = sparkSession
         self._collector = collector
 
+    def list(self) -> List[int]:
+        """
+        Lists the UDF IDs that have UDF logs.
+
+        .. versionadded:: 4.0.0
+
+        Returns
+        -------
+        list of int
+            The list of UDF IDs that have UDF logs.
+        """
+        return list(self._collector._logs.keys())
+
     def collect(self, id: int) -> Optional[List[str]]:
         """
         Collects the UDF logs for the given UDF ID.
