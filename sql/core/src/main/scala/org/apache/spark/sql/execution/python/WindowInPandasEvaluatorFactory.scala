@@ -44,7 +44,8 @@ class WindowInPandasEvaluatorFactory(
     val childOutput: Seq[Attribute],
     val spillSize: SQLMetric,
     pythonMetrics: Map[String, SQLMetric],
-    profiler: Option[String])
+    profiler: Option[String],
+    udfLogLevel: String)
   extends PartitionEvaluatorFactory[InternalRow, InternalRow] with WindowEvaluatorFactoryBase {
 
   /**
@@ -370,7 +371,8 @@ class WindowInPandasEvaluatorFactory(
         pythonRunnerConf,
         pythonMetrics,
         jobArtifactUUID,
-        profiler).compute(pythonInput, context.partitionId(), context)
+        profiler,
+        udfLogLevel).compute(pythonInput, context.partitionId(), context)
 
       val joined = new JoinedRow
 

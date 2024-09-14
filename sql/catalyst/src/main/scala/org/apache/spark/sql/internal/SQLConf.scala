@@ -3161,6 +3161,17 @@ object SQLConf {
       .checkValues(Set("perf", "memory"))
       .createOptional
 
+  val PYTHON_UDF_LOG_LEVEL =
+    buildConf("spark.sql.pyspark.udf.logging.logLevel")
+      .doc("Configure the Python/Pandas UDF log level by setting it to one of the following " +
+        "values: \"DEBUG\", \"INFO\", \"WARNING\", \"ERROR\", \"FATAL\", \"CRITICAL\". " +
+        "This is set to \"WARNING\" by default.")
+      .version("4.0.0")
+      .stringConf
+      .transform(_.toUpperCase(Locale.ROOT))
+      .checkValues(Set("DEBUG", "INFO", "WARN", "WARNING", "ERROR", "FATAL", "CRITICAL"))
+      .createWithDefault("WARNING")
+
   val PYTHON_UDF_WORKER_FAULTHANLDER_ENABLED =
     buildConf("spark.sql.execution.pyspark.udf.faulthandler.enabled")
       .doc(
@@ -5877,6 +5888,8 @@ class SQLConf extends Serializable with Logging with SqlApiConf {
   def pythonUDFProfiler: Option[String] = getConf(PYTHON_UDF_PROFILER)
 
   def pythonUDFWorkerFaulthandlerEnabled: Boolean = getConf(PYTHON_UDF_WORKER_FAULTHANLDER_ENABLED)
+
+  def pythonUdfLogLevel: String = getConf(PYTHON_UDF_LOG_LEVEL)
 
   def pysparkPlotMaxRows: Int = getConf(PYSPARK_PLOT_MAX_ROWS)
 

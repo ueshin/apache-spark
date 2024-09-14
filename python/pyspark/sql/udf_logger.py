@@ -18,7 +18,7 @@ from abc import ABC, abstractmethod
 from collections import defaultdict
 import logging
 from threading import RLock
-from typing import ClassVar, Dict, List, Optional, cast, TYPE_CHECKING
+from typing import ClassVar, Dict, List, Optional, Union, TYPE_CHECKING
 
 from pyspark.accumulators import (
     Accumulator,
@@ -83,10 +83,11 @@ class UDFLogHandler(logging.Handler):
 
 
 class PySparkUDFLogger(PySparkLoggerBase):
+    _log_level: ClassVar[Union[int, str]] = logging.WARN
     _result_id: ClassVar[Optional[int]] = None
 
     def __init__(self, name: Optional[str] = None):
-        super().__init__(name or "PySparkUDFLogger", level=logging.WARN)
+        super().__init__(name or "PySparkUDFLogger", level=self._log_level)
         if self._result_id is not None:
             self.addHandler(UDFLogHandler(self._result_id))
 
@@ -120,6 +121,10 @@ class UDFLogCollector(ABC):
     def _logs(self) -> Logs:
         pass
 
+    def list(self) -> List[int]:
+        with self._lock:
+            return list(self._logs.keys())
+
     def collect(self, id: int) -> Optional[List[str]]:
         with self._lock:
             return self._logs.get(id)
@@ -148,9 +153,12 @@ class AccumulatorUDFLogCollector(UDFLogCollector):
 
 
 class UDFLogs:
-    def __init__(self, sparkSession: "SparkSession", collector: UDFLogCollector):
+    def __init__(self, sparkSession: "SparkSession"):
         self._sparkSession = sparkSession
-        self._collector = collector
+
+    @property
+    def _collector(self) -> UDFLogCollector:
+        return self._sparkSession._udf_log_collector
 
     def list(self) -> List[int]:
         """
@@ -163,7 +171,7 @@ class UDFLogs:
         list of int
             The list of UDF IDs that have UDF logs.
         """
-        return list(self._collector._logs.keys())
+        return self._collector.list()
 
     def collect(self, id: int) -> Optional[List[str]]:
         """

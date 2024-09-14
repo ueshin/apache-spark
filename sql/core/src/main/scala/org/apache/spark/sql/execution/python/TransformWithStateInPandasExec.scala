@@ -89,6 +89,8 @@ case class TransformWithStateInPandasExec(
   // Each state variable has its own schema, this is a dummy one.
   protected val schemaForValueRow: StructType = new StructType().add("value", BinaryType)
 
+  private val pythonUdfLogLevel: String = conf.pythonUdfLogLevel
+
   override def requiredChildDistribution: Seq[Distribution] = {
     StatefulOperatorPartitioning.getCompatibleDistribution(groupingAttributes,
       getStateInfo, conf) ::
@@ -144,7 +146,8 @@ case class TransformWithStateInPandasExec(
           pythonRunnerConf,
           pythonMetrics,
           jobArtifactUUID,
-          groupingKeySchema
+          groupingKeySchema,
+          pythonUdfLogLevel
         )
 
         val outputIterator = executePython(data, output, runner)

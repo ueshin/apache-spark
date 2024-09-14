@@ -1086,7 +1086,7 @@ class SparkSession:
 
     @property
     def udfLogs(self) -> UDFLogs:
-        return UDFLogs(self, self._client._udf_log_collector)  # type: ignore[arg-type]
+        return UDFLogs(self)  # type: ignore[arg-type]
 
     udfLogs.__doc__ = PySparkSession.udfLogs.__doc__
 

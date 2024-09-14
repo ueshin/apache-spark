@@ -78,7 +78,8 @@ case class ArrowEvalPythonExec(udfs: Seq[PythonUDF], resultAttrs: Seq[Attribute]
       ArrowPythonRunner.getPythonRunnerConfMap(conf),
       pythonMetrics,
       jobArtifactUUID,
-      conf.pythonUDFProfiler)
+      conf.pythonUDFProfiler,
+      conf.pythonUdfLogLevel)
   }
 
   override protected def withNewChildInternal(newChild: SparkPlan): SparkPlan =
@@ -96,7 +97,8 @@ class ArrowEvalPythonEvaluatorFactory(
     pythonRunnerConf: Map[String, String],
     pythonMetrics: Map[String, SQLMetric],
     jobArtifactUUID: Option[String],
-    profiler: Option[String])
+    profiler: Option[String],
+    udfLogLevel: String)
   extends EvalPythonEvaluatorFactory(childOutput, udfs, output) {
 
   override def evaluate(
@@ -121,7 +123,8 @@ class ArrowEvalPythonEvaluatorFactory(
       pythonRunnerConf,
       pythonMetrics,
       jobArtifactUUID,
-      profiler).compute(batchIter, context.partitionId(), context)
+      profiler,
+      udfLogLevel).compute(batchIter, context.partitionId(), context)
 
     columnarBatchIter.flatMap { batch =>
       val actualDataTypes = (0 until batch.numCols()).map(i => batch.column(i).dataType())

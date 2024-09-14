@@ -48,7 +48,8 @@ class CoGroupedArrowPythonRunner(
     conf: Map[String, String],
     override val pythonMetrics: Map[String, SQLMetric],
     jobArtifactUUID: Option[String],
-    profiler: Option[String])
+    profiler: Option[String],
+    udfLogLevel: String)
   extends BasePythonRunner[
     (Iterator[InternalRow], Iterator[InternalRow]), ColumnarBatch](
     funcs.map(_._1), evalType, argOffsets, jobArtifactUUID)
@@ -80,7 +81,7 @@ class CoGroupedArrowPythonRunner(
           PythonRDD.writeUTF(v, dataOut)
         }
 
-        PythonUDFRunner.writeUDFs(dataOut, funcs, argOffsets, profiler)
+        PythonUDFRunner.writeUDFs(dataOut, funcs, argOffsets, profiler, udfLogLevel)
       }
 
       override def writeNextInputToStream(dataOut: DataOutputStream): Boolean = {

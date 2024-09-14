@@ -1541,6 +1541,8 @@ def read_udfs(pickleSer, infile, eval_type):
     else:
         profiler = None
 
+    PySparkUDFLogger._log_level = utf8_deserializer.loads(infile)
+
     num_udfs = read_int(infile)
 
     is_scalar_iter = eval_type == PythonEvalType.SQL_SCALAR_PANDAS_ITER_UDF

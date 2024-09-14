@@ -50,7 +50,8 @@ class TransformWithStateInPandasPythonRunner(
     initialWorkerConf: Map[String, String],
     override val pythonMetrics: Map[String, SQLMetric],
     jobArtifactUUID: Option[String],
-    groupingKeySchema: StructType)
+    groupingKeySchema: StructType,
+    udfLogLevel: String)
   extends BasePythonRunner[InType, OutType](funcs.map(_._1), evalType, argOffsets, jobArtifactUUID)
   with PythonArrowInput[InType]
   with BasicPythonArrowOutput
@@ -125,7 +126,7 @@ class TransformWithStateInPandasPythonRunner(
   }
 
   override protected def writeUDF(dataOut: DataOutputStream): Unit = {
-    PythonUDFRunner.writeUDFs(dataOut, funcs, argOffsets, None)
+    PythonUDFRunner.writeUDFs(dataOut, funcs, argOffsets, None, udfLogLevel)
   }
 
   private var pandasWriter: BaseStreamingArrowWriter = _

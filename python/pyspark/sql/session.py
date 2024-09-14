@@ -972,7 +972,7 @@ class SparkSession(SparkConversionMixin):
         -----
         Supports Spark Connect.
         """
-        return UDFLogs(self, self._udf_log_collector)
+        return UDFLogs(self)
 
     def range(
         self,
