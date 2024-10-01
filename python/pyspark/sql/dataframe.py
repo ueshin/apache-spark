@@ -6427,6 +6427,18 @@ class DataFrame:
         """
         ...
 
+    def scalar(self) -> Column:
+        """
+        TODO: Add documentation
+        """
+        ...
+
+    def exists(self) -> Column:
+        """
+        TODO: Add documentation
+        """
+        ...
+
     @property
     def executionInfo(self) -> Optional["ExecutionInfo"]:
         """

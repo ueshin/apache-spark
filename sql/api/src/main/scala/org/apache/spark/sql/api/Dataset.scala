@@ -1665,6 +1665,18 @@ abstract class Dataset[T] extends Serializable {
   def transpose(): Dataset[Row]
 
   /**
+   * TODO: Add documentation
+   * @return
+   */
+  def scalar(): Column
+
+  /**
+   * TODO: Add documentation
+   * @return
+   */
+  def exists(): Column
+
+  /**
    * Define (named) metrics to observe on the Dataset. This method returns an 'observed' Dataset
    * that returns the same result as the input, with the following guarantees: <ul> <li>It will
    * compute the defined aggregates (metrics) on all the data that is flowing through the Dataset

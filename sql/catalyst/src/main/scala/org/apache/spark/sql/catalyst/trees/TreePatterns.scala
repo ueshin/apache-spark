@@ -168,4 +168,8 @@ object TreePattern extends Enumeration  {
 
   // Execution Plan patterns (alphabetically ordered)
   val EXCHANGE: Value = Value
+
+  // Lazy analysis expression patterns (alphabetically ordered)
+  val LAZY_ANALYSIS_EXPRESSION: Value = Value
+  val LAZY_OUTER_REFERENCE: Value = Value
 }

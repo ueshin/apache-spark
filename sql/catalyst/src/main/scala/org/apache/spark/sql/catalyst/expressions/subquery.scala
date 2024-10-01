@@ -19,9 +19,11 @@ package org.apache.spark.sql.catalyst.expressions
 
 import scala.collection.mutable.ArrayBuffer
 
+import org.apache.spark.sql.catalyst.analysis.{LazyOuterReference, UnresolvedAttribute}
 import org.apache.spark.sql.catalyst.expressions.aggregate.AggregateExpression
 import org.apache.spark.sql.catalyst.plans._
 import org.apache.spark.sql.catalyst.plans.logical._
+import org.apache.spark.sql.catalyst.trees.TreePattern
 import org.apache.spark.sql.catalyst.trees.TreePattern._
 import org.apache.spark.sql.errors.QueryCompilationErrors
 import org.apache.spark.sql.internal.SQLConf
@@ -371,6 +373,13 @@ object SubExprUtils extends PredicateHelper {
       x.references.nonEmpty))
     val nonEquivalentGroupByExprs = groupByExprs -- correlatedEquivalentExprs
     nonEquivalentGroupByExprs
+  }
+
+  def removeLazyOuterReferences(logicalPlan: LogicalPlan): LogicalPlan = {
+    logicalPlan.transformAllExpressionsWithPruning(
+      _.containsPattern(TreePattern.LAZY_OUTER_REFERENCE)) {
+      case or: LazyOuterReference => UnresolvedAttribute(or.nameParts)
+    }
   }
 }
 

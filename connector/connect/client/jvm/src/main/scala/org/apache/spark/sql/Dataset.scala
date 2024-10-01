@@ -582,6 +582,18 @@ class Dataset[T] private[sql] (
     buildTranspose(Seq.empty)
 
   /** @inheritdoc */
+  def scalar(): Column = {
+    // FIXME: Implement this method
+    Column(UnresolvedAttribute("scalar", getPlanId))
+  }
+
+  /** @inheritdoc */
+  def exists(): Column = {
+    // FIXME: Implement this method
+    Column(UnresolvedAttribute("exists", getPlanId))
+  }
+
+  /** @inheritdoc */
   def limit(n: Int): Dataset[T] = sparkSession.newDataset(agnosticEncoder) { builder =>
     builder.getLimitBuilder
       .setInput(plan.getRoot)

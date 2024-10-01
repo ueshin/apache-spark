@@ -57,6 +57,9 @@ private[sql] trait ColumnNodeToExpressionConverter extends (ColumnNode => Expres
         case UnresolvedAttribute(unparsedIdentifier, planId, isMetadataColumn, _) =>
           convertUnresolvedAttribute(unparsedIdentifier, planId, isMetadataColumn)
 
+        case LazyOuterReference(unparsedIdentifier, planId, _) =>
+          convertLazyOuterReference(unparsedIdentifier, planId)
+
         case UnresolvedStar(unparsedTarget, None, _) =>
           val target = unparsedTarget.map { t =>
             analysis.UnresolvedAttribute.parseAttributeName(t.stripSuffix(".*"))
@@ -234,6 +237,17 @@ private[sql] trait ColumnNodeToExpressionConverter extends (ColumnNode => Expres
       attribute.setTagValue(LogicalPlan.IS_METADATA_COL, ())
     }
     attribute
+  }
+
+  private def convertLazyOuterReference(
+      unparsedIdentifier: String,
+      planId: Option[Long]): analysis.LazyOuterReference = {
+    val lazyOuterReference =
+      analysis.LazyOuterReference.quotedString(unparsedIdentifier)
+    if (planId.isDefined) {
+      lazyOuterReference.setTagValue(LogicalPlan.PLAN_ID_TAG, planId.get)
+    }
+    lazyOuterReference
   }
 }
 

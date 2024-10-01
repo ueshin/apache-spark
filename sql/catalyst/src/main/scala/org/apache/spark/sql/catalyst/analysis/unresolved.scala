@@ -984,3 +984,32 @@ case class UnresolvedTranspose(
   override protected def withNewChildInternal(newChild: LogicalPlan): UnresolvedTranspose =
     copy(child = newChild)
 }
+
+case class LazyOuterReference(
+     nameParts: Seq[String])
+  extends LeafExpression with NamedExpression with Unevaluable with LazyAnalysisExpression {
+
+  def name: String =
+    nameParts.map(n => if (n.contains(".")) s"`$n`" else n).mkString(".")
+
+  override def exprId: ExprId = throw new UnresolvedException("exprId")
+  override def dataType: DataType = throw new UnresolvedException("dataType")
+  override def nullable: Boolean = throw new UnresolvedException("nullable")
+  override def qualifier: Seq[String] = throw new UnresolvedException("qualifier")
+
+  override def toAttribute: Attribute = throw new UnresolvedException("toAttribute")
+  override def newInstance(): NamedExpression = LazyOuterReference(nameParts)
+
+  override def nodePatternsInternal(): Seq[TreePattern] = Seq(LAZY_OUTER_REFERENCE)
+}
+
+object LazyOuterReference extends AttributeNameParser {
+
+  /**
+   * Creates an [[LazyOuterReference]] from a string in an embedded language.  In this case
+   * we treat it as a quoted identifier, except for '.', which must be further quoted using
+   * backticks if it is part of a column name.
+   */
+  def quotedString(name: String): LazyOuterReference =
+    new LazyOuterReference(parseAttributeName(name))
+}

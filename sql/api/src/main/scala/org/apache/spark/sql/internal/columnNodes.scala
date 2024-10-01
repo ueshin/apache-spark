@@ -140,6 +140,16 @@ private[sql] case class UnresolvedAttribute(
   override def sql: String = unparsedIdentifier
 }
 
+private[sql] case class LazyOuterReference(
+    unparsedIdentifier: String,
+    planId: Option[Long] = None,
+    override val origin: Origin = CurrentOrigin.get)
+  extends ColumnNode {
+  override private[internal] def normalize(): LazyOuterReference =
+    copy(planId = None, origin = NO_ORIGIN)
+  override def sql: String = unparsedIdentifier
+}
+
 /**
  * Reference to all columns in a namespace (global, a Dataframe, or a nested struct).
  *
