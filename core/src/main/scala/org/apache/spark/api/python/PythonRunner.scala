@@ -518,6 +518,12 @@ private[spark] abstract class BasePythonRunner[IN, OUT](
      */
     protected def read(): OUT
 
+    protected def test(): Unit = {
+      // scalastyle:off println
+      println(PythonWorkerUtils.readUTF(stream))
+      // scalastyle:on println
+    }
+
     protected def handleTimingData(): Unit = {
       // Timing data from worker
       val bootTime = stream.readLong()
@@ -904,6 +910,8 @@ private[spark] object SpecialLengths {
   val NULL = -5
   val START_ARROW_STREAM = -6
   val END_OF_MICRO_BATCH = -7
+
+  val TEST = -999
 }
 
 private[spark] object BarrierTaskContextMessageProtocol {

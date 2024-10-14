@@ -26,6 +26,7 @@ from pyspark.serializers import (
     Serializer,
     read_int,
     write_int,
+    write_with_length,
     UTF8Deserializer,
     CPickleSerializer,
 )
@@ -55,6 +56,8 @@ class SpecialLengths:
     END_OF_STREAM = -4
     NULL = -5
     START_ARROW_STREAM = -6
+
+    TEST = -999
 
 
 class ArrowCollectSerializer(Serializer):
@@ -114,6 +117,8 @@ class ArrowStreamSerializer(Serializer):
                 if writer is None:
                     writer = pa.RecordBatchStreamWriter(stream, batch.schema)
                 writer.write_batch(batch)
+                write_int(SpecialLengths.TEST, stream)
+                write_with_length("TEST".encode("utf-8"), stream)
         finally:
             if writer is not None:
                 writer.close()
@@ -550,6 +555,8 @@ class ArrowStreamPandasUDFSerializer(ArrowStreamPandasSerializer):
                 if should_write_start_length:
                     write_int(SpecialLengths.START_ARROW_STREAM, stream)
                     should_write_start_length = False
+                else:
+                    write_int(0, stream)
                 yield batch
 
         return ArrowStreamSerializer.dump_stream(self, init_stream_yield_batches(), stream)

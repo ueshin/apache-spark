@@ -99,6 +99,9 @@ abstract class BasePythonUDFRunner(
               val obj = PythonWorkerUtils.readBytes(length, stream)
               pythonMetrics("pythonDataReceived") += length
               obj
+            case SpecialLengths.TEST =>
+              test()
+              read()
             case SpecialLengths.TIMING_DATA =>
               handleTimingData()
               read()

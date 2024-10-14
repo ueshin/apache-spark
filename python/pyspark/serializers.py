@@ -86,6 +86,8 @@ class SpecialLengths:
     NULL = -5
     START_ARROW_STREAM = -6
 
+    TEST = -999
+
 
 class Serializer:
     def dump_stream(self, iterator, stream):
@@ -221,7 +223,10 @@ class BatchedSerializer(Serializer):
                 yield items
 
     def dump_stream(self, iterator, stream):
-        self.serializer.dump_stream(self._batched(iterator), stream)
+        for batch in self._batched(iterator):
+            self.serializer._write_with_length(batch, stream)
+            write_int(SpecialLengths.TEST, stream)
+            write_with_length("TEST".encode("utf-8"), stream)
 
     def load_stream(self, stream):
         return chain.from_iterable(self._load_stream_without_unbatching(stream))

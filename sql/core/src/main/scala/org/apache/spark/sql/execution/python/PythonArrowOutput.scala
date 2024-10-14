@@ -78,47 +78,52 @@ private[python] trait PythonArrowOutput[OUT <: AnyRef] { self: BasePythonRunner[
         super.handleEndOfDataSection()
       }
 
+      private def readBatch(): OUT = {
+        val bytesReadStart = reader.bytesRead()
+        batchLoaded = reader.loadNextBatch()
+        if (batchLoaded) {
+          val batch = new ColumnarBatch(vectors)
+          val rowCount = root.getRowCount
+          batch.setNumRows(root.getRowCount)
+          val bytesReadEnd = reader.bytesRead()
+          pythonMetrics("pythonNumRowsReceived") += rowCount
+          pythonMetrics("pythonDataReceived") += bytesReadEnd - bytesReadStart
+          deserializeColumnarBatch(batch, schema)
+        } else {
+          reader.close(false)
+          allocator.close()
+          // Reach end of stream. Call `read()` again to read control data.
+          read()
+        }
+      }
+
       protected override def read(): OUT = {
         if (writer.exception.isDefined) {
           throw writer.exception.get
         }
         try {
-          if (reader != null && batchLoaded) {
-            val bytesReadStart = reader.bytesRead()
-            batchLoaded = reader.loadNextBatch()
-            if (batchLoaded) {
-              val batch = new ColumnarBatch(vectors)
-              val rowCount = root.getRowCount
-              batch.setNumRows(root.getRowCount)
-              val bytesReadEnd = reader.bytesRead()
-              pythonMetrics("pythonNumRowsReceived") += rowCount
-              pythonMetrics("pythonDataReceived") += bytesReadEnd - bytesReadStart
-              deserializeColumnarBatch(batch, schema)
-            } else {
-              reader.close(false)
-              allocator.close()
-              // Reach end of stream. Call `read()` again to read control data.
+          stream.readInt() match {
+            case 0 if (reader != null && batchLoaded) =>
+              readBatch()
+            case SpecialLengths.TEST =>
+              test()
               read()
-            }
-          } else {
-            stream.readInt() match {
-              case SpecialLengths.START_ARROW_STREAM =>
-                reader = new ArrowStreamReader(stream, allocator)
-                root = reader.getVectorSchemaRoot()
-                schema = ArrowUtils.fromArrowSchema(root.getSchema())
-                vectors = root.getFieldVectors().asScala.map { vector =>
-                  new ArrowColumnVector(vector)
-                }.toArray[ColumnVector]
-                read()
-              case SpecialLengths.TIMING_DATA =>
-                handleTimingData()
-                read()
-              case SpecialLengths.PYTHON_EXCEPTION_THROWN =>
-                throw handlePythonException()
-              case SpecialLengths.END_OF_DATA_SECTION =>
-                handleEndOfDataSection()
-                null.asInstanceOf[OUT]
-            }
+            case SpecialLengths.START_ARROW_STREAM =>
+              reader = new ArrowStreamReader(stream, allocator)
+              root = reader.getVectorSchemaRoot()
+              schema = ArrowUtils.fromArrowSchema(root.getSchema())
+              vectors = root.getFieldVectors().asScala.map { vector =>
+                new ArrowColumnVector(vector)
+              }.toArray[ColumnVector]
+              readBatch()
+            case SpecialLengths.TIMING_DATA =>
+              handleTimingData()
+              read()
+            case SpecialLengths.PYTHON_EXCEPTION_THROWN =>
+              throw handlePythonException()
+            case SpecialLengths.END_OF_DATA_SECTION =>
+              handleEndOfDataSection()
+              null.asInstanceOf[OUT]
           }
         } catch handleException
       }
