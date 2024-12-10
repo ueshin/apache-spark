@@ -42,7 +42,7 @@ import org.apache.spark.sql.errors.DataTypeErrors.toSQLId
 import org.apache.spark.sql.execution.QueryExecution
 import org.apache.spark.sql.expressions.SparkUserDefinedFunction
 import org.apache.spark.sql.functions.{struct, to_json}
-import org.apache.spark.sql.internal.{ColumnNodeToProtoConverter, DataFrameWriterImpl, DataFrameWriterV2Impl, MergeIntoWriterImpl, ToScalaUDF, UDFAdaptors, UnresolvedAttribute, UnresolvedRegex}
+import org.apache.spark.sql.internal.{ColumnNodeToProtoConverter, DataFrameWriterImpl, DataFrameWriterV2Impl, MergeIntoWriterImpl, SubqueryExpressionNode, SubqueryType, ToScalaUDF, UDFAdaptors, UnresolvedAttribute, UnresolvedRegex}
 import org.apache.spark.sql.streaming.DataStreamWriter
 import org.apache.spark.sql.types.{Metadata, StructType}
 import org.apache.spark.storage.StorageLevel
@@ -444,7 +444,7 @@ class Dataset[T] private[sql] (
         .addAllParameters(parameters.map(p => functions.lit(p).expr).asJava)
     }
 
-  private def getPlanId: Option[Long] =
+  private[sql] def getPlanId: Option[Long] =
     if (plan.getRoot.hasCommon && plan.getRoot.getCommon.hasPlanId) {
       Option(plan.getRoot.getCommon.getPlanId)
     } else {
@@ -624,18 +624,15 @@ class Dataset[T] private[sql] (
   def transpose(): DataFrame =
     buildTranspose(Seq.empty)
 
-  // TODO(SPARK-50134): Support scalar Subquery API in Spark Connect
-  // scalastyle:off not.implemented.error.usage
   /** @inheritdoc */
   def scalar(): Column = {
-    ???
+    Column(SubqueryExpressionNode(this, SubqueryType.SCALAR))
   }
 
   /** @inheritdoc */
   def exists(): Column = {
-    ???
+    Column(SubqueryExpressionNode(this, SubqueryType.EXISTS))
   }
-  // scalastyle:on not.implemented.error.usage
 
   /** @inheritdoc */
   def limit(n: Int): Dataset[T] = sparkSession.newDataset(agnosticEncoder) { builder =>

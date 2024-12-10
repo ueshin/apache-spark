@@ -333,6 +333,12 @@ class SparkSession private[sql] (
 
   @Since("4.0.0")
   @DeveloperApi
+  def newDataFrame(references: Seq[Dataset[_]])(f: proto.Relation.Builder => Unit): DataFrame = {
+    newDataset(UnboundRowEncoder, references)(f)
+  }
+
+  @Since("4.0.0")
+  @DeveloperApi
   def newDataset[T](encoder: AgnosticEncoder[T])(
       f: proto.Relation.Builder => Unit): Dataset[T] = {
     val builder = proto.Relation.newBuilder()
@@ -340,6 +346,21 @@ class SparkSession private[sql] (
     builder.getCommonBuilder.setPlanId(planIdGenerator.getAndIncrement())
     val plan = proto.Plan.newBuilder().setRoot(builder).build()
     new Dataset[T](this, plan, encoder)
+  }
+
+  @Since("4.0.0")
+  @DeveloperApi
+  def newDataset[T](encoder: AgnosticEncoder[T], references: Seq[Dataset[_]])(
+      f: proto.Relation.Builder => Unit): Dataset[T] = {
+    if (references.length == 0) {
+      newDataset(encoder)(f)
+    } else {
+      val builder = proto.Relation.newBuilder()
+      f(builder)
+      builder.getCommonBuilder.setPlanId(planIdGenerator.getAndIncrement())
+      val plan = proto.Plan.newBuilder().setRoot(builder).build()
+      new Dataset[T](this, plan, encoder)
+    }
   }
 
   private[sql] def newCommand[T](f: proto.Command.Builder => Unit): proto.Command = {

@@ -24,7 +24,7 @@ import org.apache.spark.connect.proto.Expression
 import org.apache.spark.connect.proto.Expression.SortOrder.NullOrdering.{SORT_NULLS_FIRST, SORT_NULLS_LAST}
 import org.apache.spark.connect.proto.Expression.SortOrder.SortDirection.{SORT_DIRECTION_ASCENDING, SORT_DIRECTION_DESCENDING}
 import org.apache.spark.connect.proto.Expression.Window.WindowFrame.{FrameBoundary, FrameType}
-import org.apache.spark.sql.{Column, Encoder}
+import org.apache.spark.sql.{Column, Dataset, Encoder}
 import org.apache.spark.sql.catalyst.trees.{CurrentOrigin, Origin}
 import org.apache.spark.sql.connect.common.DataTypeProtoConverter
 import org.apache.spark.sql.connect.common.LiteralValueProtoConverter.toLiteralProtoBuilder
@@ -167,6 +167,14 @@ object ColumnNodeToProtoConverter extends (ColumnNode => proto.Expression) {
       case LazyExpression(child, _) =>
         builder.getLazyExpressionBuilder.setChild(apply(child, e))
 
+      case SubqueryExpressionNode(query, subqueryType, _) =>
+        val b = builder.getSubqueryExpressionBuilder
+        b.setSubqueryType(subqueryType match {
+          case SubqueryType.SCALAR => proto.SubqueryExpression.SubqueryType.SUBQUERY_TYPE_SCALAR
+          case SubqueryType.EXISTS => proto.SubqueryExpression.SubqueryType.SUBQUERY_TYPE_EXISTS
+        })
+        query.getPlanId.foreach(b.setPlanId)
+
       case ProtoColumnNode(e, _) =>
         return e
 
@@ -217,4 +225,19 @@ case class ProtoColumnNode(
     override val origin: Origin = CurrentOrigin.get)
     extends ColumnNode {
   override def sql: String = expr.toString
+}
+
+sealed trait SubqueryType
+
+object SubqueryType {
+  case object SCALAR extends SubqueryType
+  case object EXISTS extends SubqueryType
+}
+
+case class SubqueryExpressionNode(
+    query: Dataset[_],
+    subqueryType: SubqueryType,
+    override val origin: Origin = CurrentOrigin.get)
+    extends ColumnNode {
+  override def sql: String = s"$subqueryType ($query)"
 }
