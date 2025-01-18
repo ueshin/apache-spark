@@ -23,10 +23,11 @@ import java.nio.ByteBuffer
 import java.nio.channels.SelectionKey
 import java.nio.charset.StandardCharsets.UTF_8
 import java.nio.file.{Files => JavaFiles, Path}
-import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.{ConcurrentHashMap, TimeUnit}
 import java.util.concurrent.atomic.AtomicBoolean
 
 import scala.jdk.CollectionConverters._
+import scala.util.{Success, Try}
 import scala.util.control.NonFatal
 
 import org.apache.spark._
@@ -122,6 +123,8 @@ private[spark] abstract class BasePythonRunner[IN, OUT](
   protected val authSocketTimeout = conf.get(PYTHON_AUTH_SOCKET_TIMEOUT)
   private val reuseWorker = conf.get(PYTHON_WORKER_REUSE)
   protected val faultHandlerEnabled: Boolean = conf.get(PYTHON_WORKER_FAULTHANLDER_ENABLED)
+  protected val idleTimeoutSeconds: Long = conf.get(PYTHON_WORKER_IDLE_TIMEOUT_SECONDS)
+  protected val killOnIdleTimeout: Boolean = conf.get(PYTHON_WORKER_KILL_ON_IDLE_TIMEOUT)
   protected val simplifiedTraceback: Boolean = false
 
   // All the Python functions should have the same exec, version and envvars.
@@ -219,7 +222,7 @@ private[spark] abstract class BasePythonRunner[IN, OUT](
 
     envVars.put("SPARK_JOB_ARTIFACT_UUID", jobArtifactUUID.getOrElse("default"))
 
-    val (worker: PythonWorker, pid: Option[Int]) = env.createPythonWorker(
+    val (worker: PythonWorker, handle: Option[ProcessHandle]) = env.createPythonWorker(
       pythonExec, workerModule, daemonModule, envVars.asScala.toMap)
     // Whether is the worker released into idle pool or closed. When any codes try to release or
     // close a worker, they should use `releasedOrClosed.compareAndSet` to flip the state to make
@@ -252,10 +255,11 @@ private[spark] abstract class BasePythonRunner[IN, OUT](
     }
 
     // Return an iterator that read lines from the process's stdout
-    val dataIn = new DataInputStream(
-      new BufferedInputStream(new ReaderInputStream(worker, writer), bufferSize))
+    val dataIn = new DataInputStream(new BufferedInputStream(
+      new ReaderInputStream(worker, writer, handle, idleTimeoutSeconds, killOnIdleTimeout),
+      bufferSize))
     val stdoutIterator = newReaderIterator(
-      dataIn, writer, startTime, env, worker, pid, releasedOrClosed, context)
+      dataIn, writer, startTime, env, worker, handle.map(_.pid.toInt), releasedOrClosed, context)
     new InterruptibleIterator(context, stdoutIterator)
   }
 
@@ -636,7 +640,12 @@ private[spark] abstract class BasePythonRunner[IN, OUT](
     }
   }
 
-  class ReaderInputStream(worker: PythonWorker, writer: Writer) extends InputStream {
+  class ReaderInputStream(
+      worker: PythonWorker,
+      writer: Writer,
+      handle: Option[ProcessHandle],
+      idleTimeoutSeconds: Long,
+      killOnIdleTimeout: Boolean) extends InputStream {
     private[this] var writerIfbhThreadLocalValue: Object = null
     private[this] val temp = new Array[Byte](1)
     private[this] val bufferStream = new DirectByteBufferOutputStream()
@@ -661,6 +670,8 @@ private[spark] abstract class BasePythonRunner[IN, OUT](
         temp(0) & 0xff
       }
     }
+
+    private[this] var pythonWorkerKilled: Boolean = false
 
     override def read(b: Array[Byte], off: Int, len: Int): Int = {
       // The code below manipulates the InputFileBlockHolder thread local in order
@@ -695,7 +706,50 @@ private[spark] abstract class BasePythonRunner[IN, OUT](
       val buf = ByteBuffer.wrap(b, off, len)
       var n = 0
       while (n == 0) {
-        worker.selector.select()
+        val selected = worker.selector.select(TimeUnit.SECONDS.toMillis(idleTimeoutSeconds))
+        if (selected == 0) {
+          val details = () => {
+            log"handle.map(_.isAlive) = " +
+            log"${MDC(LogKeys.PYTHON_WORKER_IS_ALIVE, handle.map(_.isAlive))}, " +
+            log"channel.isConnected = " +
+            log"${MDC(LogKeys.PYTHON_WORKER_CHANNEL_IS_CONNECTED, worker.channel.isConnected)}, " +
+            log"channel.isBlocking = " +
+            log"${MDC(LogKeys.PYTHON_WORKER_CHANNEL_IS_BLOCKING_MODE,
+              worker.channel.isBlocking)}, " + (
+              if (!worker.channel.isBlocking) {
+                log"selector.isOpen = " +
+                  log"${MDC(LogKeys.PYTHON_WORKER_SELECTOR_IS_OPEN, worker.selector.isOpen)}, " +
+                  log"selectionKey.isValid = " +
+                  log"${
+                    MDC(LogKeys.PYTHON_WORKER_SELECTION_KEY_IS_VALID,
+                      worker.selectionKey.isValid)
+                  }, " +
+                  (Try(worker.selectionKey.interestOps()) match {
+                    case Success(ops) =>
+                      log"selectionKey.interestOps = " +
+                        log"${MDC(LogKeys.PYTHON_WORKER_SELECTION_KEY_INTERESTS, ops)}, "
+                    case _ => log""
+                  })
+              } else log"") +
+            log"hasInput || buffer.hasRemaining = " +
+            log"${MDC(LogKeys.PYTHON_WORKER_HAS_INPUTS, hasInput || buffer.hasRemaining)}"
+          }
+          if (pythonWorkerKilled) {
+            logWarning(
+              log"Waiting for Python worker process to terminate after idle timeout: " + details())
+          } else {
+            logWarning(log"Idle timeout reached for Python worker (timeout: " +
+              log"${MDC(LogKeys.PYTHON_WORKER_IDLE_TIMEOUT, idleTimeoutSeconds)} seconds). " +
+              log"No data received from the worker process: " + details())
+            handle.foreach { handle =>
+              if (killOnIdleTimeout && handle.isAlive) {
+                logWarning(log"Terminating Python worker process due to idle timeout (timeout: " +
+                  log"${MDC(LogKeys.PYTHON_WORKER_IDLE_TIMEOUT, idleTimeoutSeconds)} seconds)")
+                pythonWorkerKilled = handle.destroy()
+              }
+            }
+          }
+        }
         if (worker.selectionKey.isReadable) {
           n = worker.channel.read(buf)
         }
