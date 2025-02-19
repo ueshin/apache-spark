@@ -91,6 +91,9 @@ case class TransformWithStateInPandasExec(
   private val chainedFunc =
     Seq((ChainedPythonFunctions(Seq(pythonFunction)), pythonUDF.resultId.id))
 
+  private val pythonUdfLogMaxEntries: Int = conf.pythonUdfLogMaxEntries
+  private val pythonUdfLogLevel: String = conf.pythonUdfLogLevel
+
   private val sessionLocalTimeZone = conf.sessionLocalTimeZone
   private val pythonRunnerConf = ArrowPythonRunner.getPythonRunnerConfMap(conf)
   private[this] val jobArtifactUUID = JobArtifactSet.getCurrentJobArtifactState.map(_.uuid)
@@ -404,7 +407,9 @@ case class TransformWithStateInPandasExec(
         jobArtifactUUID,
         groupingKeySchema,
         batchTimestampMs,
-        eventTimeWatermarkForEviction
+        eventTimeWatermarkForEviction,
+        pythonUdfLogMaxEntries,
+        pythonUdfLogLevel
       )
       executePython(data, output, runner)
     } else {
@@ -431,7 +436,9 @@ case class TransformWithStateInPandasExec(
         jobArtifactUUID,
         groupingKeySchema,
         batchTimestampMs,
-        eventTimeWatermarkForEviction
+        eventTimeWatermarkForEviction,
+        pythonUdfLogMaxEntries,
+        pythonUdfLogLevel
       )
       executePython(groupedData, output, runner)
     }

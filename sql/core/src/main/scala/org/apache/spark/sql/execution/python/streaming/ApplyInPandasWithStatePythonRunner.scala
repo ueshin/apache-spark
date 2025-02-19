@@ -114,8 +114,11 @@ class ApplyInPandasWithStatePythonRunner(
 
   private val stateRowDeserializer = stateEncoder.createDeserializer()
 
+  private val udfLogMaxEntries = sqlConf.pythonUdfLogMaxEntries
+  private val udfLogLevel = sqlConf.pythonUdfLogLevel
+
   override protected def writeUDF(dataOut: DataOutputStream): Unit = {
-    PythonUDFRunner.writeUDFs(dataOut, funcs, argOffsets, None)
+    PythonUDFRunner.writeUDFs(dataOut, funcs, argOffsets, None, udfLogMaxEntries, udfLogLevel)
   }
 
   /**

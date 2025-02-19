@@ -140,7 +140,9 @@ case class UserDefinedPythonDataSource(dataSourceCls: PythonFunction) {
       conf.arrowUseLargeVarTypes,
       pythonRunnerConf,
       metrics,
-      jobArtifactUUID)
+      jobArtifactUUID,
+      conf.pythonUdfLogMaxEntries,
+      conf.pythonUdfLogLevel)
   }
 
   def createPythonMetrics(): Array[CustomMetric] = {

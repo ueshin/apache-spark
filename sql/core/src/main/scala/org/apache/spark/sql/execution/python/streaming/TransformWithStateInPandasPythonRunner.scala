@@ -54,11 +54,13 @@ class TransformWithStateInPandasPythonRunner(
     jobArtifactUUID: Option[String],
     groupingKeySchema: StructType,
     batchTimestampMs: Option[Long],
-    eventTimeWatermarkForEviction: Option[Long])
+    eventTimeWatermarkForEviction: Option[Long],
+    udfLogMaxEntries: Int,
+    udfLogLevel: String)
   extends TransformWithStateInPandasPythonBaseRunner[InType](
     funcs, evalType, argOffsets, _schema, processorHandle, _timeZoneId,
     initialWorkerConf, pythonMetrics, jobArtifactUUID, groupingKeySchema,
-    batchTimestampMs, eventTimeWatermarkForEviction)
+    batchTimestampMs, eventTimeWatermarkForEviction, udfLogMaxEntries, udfLogLevel)
   with PythonArrowInput[InType] {
 
   private var pandasWriter: BaseStreamingArrowWriter = _
@@ -109,11 +111,13 @@ class TransformWithStateInPandasPythonInitialStateRunner(
     jobArtifactUUID: Option[String],
     groupingKeySchema: StructType,
     batchTimestampMs: Option[Long],
-    eventTimeWatermarkForEviction: Option[Long])
+    eventTimeWatermarkForEviction: Option[Long],
+    udfLogMaxEntries: Int,
+    udfLogLevel: String)
   extends TransformWithStateInPandasPythonBaseRunner[GroupedInType](
     funcs, evalType, argOffsets, dataSchema, processorHandle, _timeZoneId,
     initialWorkerConf, pythonMetrics, jobArtifactUUID, groupingKeySchema,
-    batchTimestampMs, eventTimeWatermarkForEviction)
+    batchTimestampMs, eventTimeWatermarkForEviction, udfLogMaxEntries, udfLogLevel)
   with PythonArrowInput[GroupedInType] {
 
   override protected lazy val schema: StructType = new StructType()
@@ -173,7 +177,9 @@ abstract class TransformWithStateInPandasPythonBaseRunner[I](
     jobArtifactUUID: Option[String],
     groupingKeySchema: StructType,
     batchTimestampMs: Option[Long],
-    eventTimeWatermarkForEviction: Option[Long])
+    eventTimeWatermarkForEviction: Option[Long],
+    udfLogMaxEntries: Int,
+    udfLogLevel: String)
   extends BasePythonRunner[I, ColumnarBatch](
     funcs.map(_._1), evalType, argOffsets, jobArtifactUUID, pythonMetrics)
   with PythonArrowInput[I]
@@ -226,7 +232,7 @@ abstract class TransformWithStateInPandasPythonBaseRunner[I](
   }
 
   override protected def writeUDF(dataOut: DataOutputStream): Unit = {
-    PythonUDFRunner.writeUDFs(dataOut, funcs, argOffsets, None)
+    PythonUDFRunner.writeUDFs(dataOut, funcs, argOffsets, None, udfLogMaxEntries, udfLogLevel)
   }
 }
 

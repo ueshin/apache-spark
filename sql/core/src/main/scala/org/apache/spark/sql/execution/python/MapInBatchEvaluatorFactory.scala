@@ -37,7 +37,9 @@ class MapInBatchEvaluatorFactory(
     largeVarTypes: Boolean,
     pythonRunnerConf: Map[String, String],
     val pythonMetrics: Map[String, SQLMetric],
-    jobArtifactUUID: Option[String])
+    jobArtifactUUID: Option[String],
+    udfLogMaxEntries: Int,
+    udfLogLevel: String)
   extends PartitionEvaluatorFactory[InternalRow, InternalRow] {
 
   override def createEvaluator(): PartitionEvaluator[InternalRow, InternalRow] =
@@ -71,7 +73,9 @@ class MapInBatchEvaluatorFactory(
         pythonRunnerConf,
         pythonMetrics,
         jobArtifactUUID,
-        None).compute(batchIter, context.partitionId(), context)
+        None,
+        udfLogMaxEntries,
+        udfLogLevel).compute(batchIter, context.partitionId(), context)
 
       val unsafeProj = UnsafeProjection.create(output, output)
 

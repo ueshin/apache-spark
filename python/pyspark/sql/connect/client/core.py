@@ -98,6 +98,7 @@ from pyspark.sql.connect.plan import (
     PythonDataSource,
 )
 from pyspark.sql.connect.observation import Observation
+from pyspark.sql.connect.udf_log_collector import ConnectUDFLogCollector
 from pyspark.sql.connect.utils import get_python_ver
 from pyspark.sql.pandas.types import _create_converter_to_pandas, from_arrow_schema
 from pyspark.sql.types import DataType, StructType, TimestampType, _has_type
@@ -674,6 +675,7 @@ class SparkConnectClient(object):
         self._server_session_id: Optional[str] = None
 
         self._profiler_collector = ConnectProfilerCollector()
+        self._udf_log_collector = ConnectUDFLogCollector()
 
         self._progress_handlers: List[ProgressHandler] = []
 
@@ -1408,6 +1410,8 @@ class SparkConnectClient(object):
                             (aid, update) = pickleSer.loads(LiteralExpression._to_value(metric))
                             if aid == SpecialAccumulatorIds.SQL_UDF_PROFIER:
                                 self._profiler_collector._update(update)
+                            elif aid == SpecialAccumulatorIds.SQL_UDF_LOGGER:
+                                self._udf_log_collector._update(update)
                     elif observed_metrics.name in observations:
                         observation_result = observations[observed_metrics.name]._result
                         assert observation_result is not None

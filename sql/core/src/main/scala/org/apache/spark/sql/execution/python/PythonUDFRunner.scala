@@ -122,11 +122,13 @@ class PythonUDFRunner(
     argOffsets: Array[Array[Int]],
     pythonMetrics: Map[String, SQLMetric],
     jobArtifactUUID: Option[String],
-    profiler: Option[String])
+    profiler: Option[String],
+    udfLogMaxEntries: Int,
+    udfLogLevel: String)
   extends BasePythonUDFRunner(funcs, evalType, argOffsets, pythonMetrics, jobArtifactUUID) {
 
   override protected def writeUDF(dataOut: DataOutputStream): Unit = {
-    PythonUDFRunner.writeUDFs(dataOut, funcs, argOffsets, profiler)
+    PythonUDFRunner.writeUDFs(dataOut, funcs, argOffsets, profiler, udfLogMaxEntries, udfLogLevel)
   }
 }
 
@@ -136,12 +138,14 @@ class PythonUDFWithNamedArgumentsRunner(
     argMetas: Array[Array[ArgumentMetadata]],
     pythonMetrics: Map[String, SQLMetric],
     jobArtifactUUID: Option[String],
-    profiler: Option[String])
+    profiler: Option[String],
+    udfLogMaxEntries: Int,
+    udfLogLevel: String)
   extends BasePythonUDFRunner(
     funcs, evalType, argMetas.map(_.map(_.offset)), pythonMetrics, jobArtifactUUID) {
 
   override protected def writeUDF(dataOut: DataOutputStream): Unit = {
-    PythonUDFRunner.writeUDFs(dataOut, funcs, argMetas, profiler)
+    PythonUDFRunner.writeUDFs(dataOut, funcs, argMetas, profiler, udfLogMaxEntries, udfLogLevel)
   }
 }
 
@@ -151,13 +155,20 @@ object PythonUDFRunner {
       dataOut: DataOutputStream,
       funcs: Seq[(ChainedPythonFunctions, Long)],
       argOffsets: Array[Array[Int]],
-      profiler: Option[String]): Unit = {
+      profiler: Option[String],
+      udfLogMaxEntries: Int,
+      udfLogLevel: String): Unit = {
     profiler match {
       case Some(p) =>
         dataOut.writeBoolean(true)
         PythonWorkerUtils.writeUTF(p, dataOut)
       case _ => dataOut.writeBoolean(false)
     }
+
+    // UDF Logging
+    dataOut.writeInt(udfLogMaxEntries)
+    PythonWorkerUtils.writeUTF(udfLogLevel, dataOut)
+
     dataOut.writeInt(funcs.length)
     funcs.zip(argOffsets).foreach { case ((chained, resultId), offsets) =>
       dataOut.writeInt(offsets.length)
@@ -168,9 +179,7 @@ object PythonUDFRunner {
       chained.funcs.foreach { f =>
         PythonWorkerUtils.writePythonFunction(f, dataOut)
       }
-      if (profiler.isDefined) {
-        dataOut.writeLong(resultId)
-      }
+      dataOut.writeLong(resultId)
     }
   }
 
@@ -178,13 +187,20 @@ object PythonUDFRunner {
       dataOut: DataOutputStream,
       funcs: Seq[(ChainedPythonFunctions, Long)],
       argMetas: Array[Array[ArgumentMetadata]],
-      profiler: Option[String]): Unit = {
+      profiler: Option[String],
+      udfLogMaxEntries: Int,
+      udfLogLevel: String): Unit = {
     profiler match {
       case Some(p) =>
         dataOut.writeBoolean(true)
         PythonWorkerUtils.writeUTF(p, dataOut)
       case _ => dataOut.writeBoolean(false)
     }
+
+    // UDF Logging
+    dataOut.writeInt(udfLogMaxEntries)
+    PythonWorkerUtils.writeUTF(udfLogLevel, dataOut)
+
     dataOut.writeInt(funcs.length)
     funcs.zip(argMetas).foreach { case ((chained, resultId), metas) =>
       dataOut.writeInt(metas.length)
@@ -203,9 +219,7 @@ object PythonUDFRunner {
       chained.funcs.foreach { f =>
         PythonWorkerUtils.writePythonFunction(f, dataOut)
       }
-      if (profiler.isDefined) {
-        dataOut.writeLong(resultId)
-      }
+      dataOut.writeLong(resultId)
     }
   }
 }
