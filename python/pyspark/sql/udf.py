@@ -34,6 +34,7 @@ from pyspark.sql.types import (
     StructType,
     _parse_datatype_string,
 )
+from pyspark.sql.udf_log_collector import UDFLogs, AccumulatorUDFLogs
 from pyspark.sql.utils import get_active_spark_context, has_arrow
 from pyspark.sql.pandas.types import to_arrow_type
 from pyspark.sql.pandas.utils import require_minimum_pandas_version, require_minimum_pyarrow_version
@@ -772,6 +773,23 @@ class UDFRegistration:
         """
 
         self.sparkSession._jsparkSession.udf().registerJavaUDAF(name, javaClassName)
+
+    @property
+    def logs(self) -> UDFLogs:
+        """
+        Returns a :class:`UDFLogs` for UDF logging.
+
+        .. versionadded:: 4.1.0
+
+        Returns
+        -------
+        :class:`UDFLogs`
+
+        Notes
+        -----
+        Supports Spark Connect.
+        """
+        return AccumulatorUDFLogs(self.sparkSession)
 
 
 def _test() -> None:

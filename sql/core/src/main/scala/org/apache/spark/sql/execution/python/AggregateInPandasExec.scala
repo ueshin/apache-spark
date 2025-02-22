@@ -181,7 +181,9 @@ case class AggregateInPandasExec(
         pythonRunnerConf,
         pythonMetrics,
         jobArtifactUUID,
-        conf.pythonUDFProfiler).compute(projectedRowIter, context.partitionId(), context)
+        conf.pythonUDFProfiler,
+        conf.pythonUdfLogMaxEntries,
+        conf.pythonUdfLogLevel).compute(projectedRowIter, context.partitionId(), context)
 
       val joinedAttributes =
         groupingExpressions.map(_.toAttribute) ++ aggExpressions.map(_.resultAttribute)

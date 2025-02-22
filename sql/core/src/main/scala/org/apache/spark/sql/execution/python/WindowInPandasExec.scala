@@ -88,7 +88,9 @@ case class WindowInPandasExec(
         child.output,
         longMetric("spillSize"),
         pythonMetrics,
-        conf.pythonUDFProfiler)
+        conf.pythonUDFProfiler,
+        conf.pythonUdfLogMaxEntries,
+        conf.pythonUdfLogLevel)
 
     // Start processing.
     if (conf.usePartitionEvaluator) {

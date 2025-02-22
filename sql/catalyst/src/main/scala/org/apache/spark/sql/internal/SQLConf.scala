@@ -3330,6 +3330,27 @@ object SQLConf {
       .checkValues(Set("perf", "memory"))
       .createOptional
 
+  val PYTHON_UDF_LOG_MAX_ENTRIES =
+    buildConf("spark.sql.pyspark.udf.logging.maxEntries")
+      .doc("The maximum number of log entries for each UDF. " +
+        "If the value is positive, logs will be limited to that number, " +
+        "dropping older entries. If it is negative, there is no limit. " +
+        "By default, it is set to 0, meaning no UDF logs are collected.")
+      .version("4.1.0")
+      .intConf
+      .createWithDefault(0)
+
+  val PYTHON_UDF_LOG_LEVEL =
+    buildConf("spark.sql.pyspark.udf.logging.logLevel")
+      .doc("Set the log level for Python/Pandas UDFs to one of: " +
+        "\"DEBUG\", \"INFO\", \"WARNING\", \"ERROR\", \"FATAL\", or \"CRITICAL\". " +
+        "The default is \"WARNING\".")
+      .version("4.1.0")
+      .stringConf
+      .transform(_.toUpperCase(Locale.ROOT))
+      .checkValues(Set("DEBUG", "INFO", "WARN", "WARNING", "ERROR", "FATAL", "CRITICAL"))
+      .createWithDefault("WARNING")
+
   val PYTHON_UDF_WORKER_FAULTHANLDER_ENABLED =
     buildConf("spark.sql.execution.pyspark.udf.faulthandler.enabled")
       .doc(
@@ -6270,6 +6291,10 @@ class SQLConf extends Serializable with Logging with SqlApiConf {
   def pysparkJVMStacktraceEnabled: Boolean = getConf(PYSPARK_JVM_STACKTRACE_ENABLED)
 
   def pythonUDFProfiler: Option[String] = getConf(PYTHON_UDF_PROFILER)
+
+  def pythonUdfLogMaxEntries: Int = getConf(PYTHON_UDF_LOG_MAX_ENTRIES)
+
+  def pythonUdfLogLevel: String = getConf(PYTHON_UDF_LOG_LEVEL)
 
   def pythonUDFWorkerFaulthandlerEnabled: Boolean = getConf(PYTHON_UDF_WORKER_FAULTHANLDER_ENABLED)
 

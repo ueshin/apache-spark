@@ -62,6 +62,7 @@ from pyspark.sql.types import (
     _from_numpy_type,
 )
 from pyspark.errors.exceptions.captured import install_exception_handler
+from pyspark.sql.udf_log_collector import AccumulatorUDFLogCollector
 from pyspark.sql.utils import (
     is_timestamp_ntz_preferred,
     to_str,
@@ -655,6 +656,7 @@ class SparkSession(SparkConversionMixin):
             jSparkSessionClass.setActiveSession(self._jsparkSession)
 
         self._profiler_collector = AccumulatorProfilerCollector()
+        self._udf_log_collector = AccumulatorUDFLogCollector()
 
     @staticmethod
     def _should_update_active_session() -> bool:

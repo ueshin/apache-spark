@@ -36,11 +36,13 @@ from pyspark.sql.connect.expressions import (
     PythonUDF,
 )
 from pyspark.sql.connect.column import Column
+from pyspark.sql.connect.udf_log_collector import ConnectUDFLogs
 from pyspark.sql.types import DataType, StringType, _parse_datatype_string
 from pyspark.sql.udf import (
     UDFRegistration as PySparkUDFRegistration,
     UserDefinedFunction as PySparkUserDefinedFunction,
 )
+from pyspark.sql.udf_log_collector import UDFLogs
 from pyspark.sql.utils import has_arrow
 from pyspark.errors import PySparkTypeError, PySparkRuntimeError
 
@@ -327,3 +329,9 @@ class UDFRegistration:
         self.sparkSession._client.register_java(name, javaClassName, aggregate=True)
 
     registerJavaUDAF.__doc__ = PySparkUDFRegistration.registerJavaUDAF.__doc__
+
+    @property
+    def logs(self) -> UDFLogs:
+        return ConnectUDFLogs(self.sparkSession)
+
+    logs.__doc__ = PySparkUDFRegistration.logs.__doc__

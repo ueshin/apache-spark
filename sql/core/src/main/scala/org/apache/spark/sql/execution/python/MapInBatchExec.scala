@@ -62,7 +62,9 @@ trait MapInBatchExec extends UnaryExecNode with PythonSQLMetrics {
       conf.arrowUseLargeVarTypes,
       pythonRunnerConf,
       pythonMetrics,
-      jobArtifactUUID)
+      jobArtifactUUID,
+      conf.pythonUdfLogMaxEntries,
+      conf.pythonUdfLogLevel)
 
     val rdd = if (isBarrier) {
       val rddBarrier = child.execute().barrier()

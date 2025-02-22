@@ -78,88 +78,7 @@ class JSONFormatter(logging.Formatter):
         return json.dumps(log_entry, ensure_ascii=False)
 
 
-class PySparkLogger(logging.Logger):
-    """
-    Custom logging.Logger wrapper for PySpark that logs messages in a structured JSON format.
-
-    PySparkLogger extends the standard Python logging.Logger class, allowing seamless integration
-    with existing logging setups. It customizes the log output to JSON format, including additional
-    context information, making it more useful for PySpark applications.
-
-    .. versionadded:: 4.0.0
-
-    Example
-    -------
-    >>> import logging
-    >>> import json
-    >>> from io import StringIO
-    >>> from pyspark.logger import PySparkLogger
-
-    >>> logger = PySparkLogger.getLogger("ExampleLogger")
-    >>> logger.setLevel(logging.INFO)
-    >>> stream = StringIO()
-    >>> handler = logging.StreamHandler(stream)
-    >>> logger.addHandler(handler)
-
-    >>> logger.info(
-    ...     "This is an informational message",
-    ...     user="test_user", action="test_action"
-    ... )
-    >>> log_output = stream.getvalue().strip().split('\\n')[0]
-    >>> log = json.loads(log_output)
-    >>> _ = log.pop("ts")  # Remove the timestamp field for static testing
-
-    >>> print(json.dumps(log, ensure_ascii=False, indent=2))
-    {
-      "level": "INFO",
-      "logger": "ExampleLogger",
-      "msg": "This is an informational message",
-      "context": {
-        "user": "test_user",
-        "action": "test_action"
-      }
-    }
-    """
-
-    def __init__(self, name: str = "PySparkLogger"):
-        super().__init__(name, level=logging.WARN)
-        _handler = logging.StreamHandler()
-        self.addHandler(_handler)
-
-    def addHandler(self, handler: logging.Handler) -> None:
-        """
-        Add the specified handler to this logger in structured JSON format.
-        """
-        handler.setFormatter(JSONFormatter())
-        super().addHandler(handler)
-
-    @staticmethod
-    def getLogger(name: Optional[str] = None) -> "PySparkLogger":
-        """
-        Return a PySparkLogger with the specified name, creating it if necessary.
-
-        If no name is specified, return the logging.RootLogger.
-
-        Parameters
-        ----------
-        name : str, optional
-            The name of the logger.
-
-        Returns
-        -------
-        PySparkLogger
-            A configured instance of PySparkLogger.
-        """
-        existing_logger = logging.getLoggerClass()
-        if not isinstance(existing_logger, PySparkLogger):
-            logging.setLoggerClass(PySparkLogger)
-
-        pyspark_logger = logging.getLogger(name)
-        # Reset to the existing logger
-        logging.setLoggerClass(existing_logger)
-
-        return cast(PySparkLogger, pyspark_logger)
-
+class PySparkLoggerBase(logging.Logger):
     def debug(self, msg: object, *args: object, **kwargs: object) -> None:
         """
         Log 'msg % args' with severity 'DEBUG' in structured JSON format.
@@ -281,6 +200,89 @@ class PySparkLogger(logging.Logger):
             stack_info=stack_info,
             stacklevel=stacklevel,
         )
+
+
+class PySparkLogger(PySparkLoggerBase):
+    """
+    Custom logging.Logger wrapper for PySpark that logs messages in a structured JSON format.
+
+    PySparkLogger extends the standard Python logging.Logger class, allowing seamless integration
+    with existing logging setups. It customizes the log output to JSON format, including additional
+    context information, making it more useful for PySpark applications.
+
+    .. versionadded:: 4.0.0
+
+    Example
+    -------
+    >>> import logging
+    >>> import json
+    >>> from io import StringIO
+    >>> from pyspark.logger import PySparkLogger
+
+    >>> logger = PySparkLogger.getLogger("ExampleLogger")
+    >>> logger.setLevel(logging.INFO)
+    >>> stream = StringIO()
+    >>> handler = logging.StreamHandler(stream)
+    >>> logger.addHandler(handler)
+
+    >>> logger.info(
+    ...     "This is an informational message",
+    ...     user="test_user", action="test_action"
+    ... )
+    >>> log_output = stream.getvalue().strip().split('\\n')[0]
+    >>> log = json.loads(log_output)
+    >>> _ = log.pop("ts")  # Remove the timestamp field for static testing
+
+    >>> print(json.dumps(log, ensure_ascii=False, indent=2))
+    {
+      "level": "INFO",
+      "logger": "ExampleLogger",
+      "msg": "This is an informational message",
+      "context": {
+        "user": "test_user",
+        "action": "test_action"
+      }
+    }
+    """
+
+    def __init__(self, name: str = "PySparkLogger"):
+        super().__init__(name, level=logging.WARN)
+        _handler = logging.StreamHandler()
+        self.addHandler(_handler)
+
+    def addHandler(self, handler: logging.Handler) -> None:
+        """
+        Add the specified handler to this logger in structured JSON format.
+        """
+        handler.setFormatter(JSONFormatter())
+        super().addHandler(handler)
+
+    @staticmethod
+    def getLogger(name: Optional[str] = None) -> "PySparkLogger":
+        """
+        Return a PySparkLogger with the specified name, creating it if necessary.
+
+        If no name is specified, return the logging.RootLogger.
+
+        Parameters
+        ----------
+        name : str, optional
+            The name of the logger.
+
+        Returns
+        -------
+        PySparkLogger
+            A configured instance of PySparkLogger.
+        """
+        existing_logger = logging.getLoggerClass()
+        if not isinstance(existing_logger, PySparkLogger):
+            logging.setLoggerClass(PySparkLogger)
+
+        pyspark_logger = logging.getLogger(name)
+        # Reset to the existing logger
+        logging.setLoggerClass(existing_logger)
+
+        return cast(PySparkLogger, pyspark_logger)
 
 
 def _test() -> None:

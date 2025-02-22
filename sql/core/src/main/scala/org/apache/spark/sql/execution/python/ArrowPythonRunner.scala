@@ -79,13 +79,15 @@ class ArrowPythonRunner(
     workerConf: Map[String, String],
     pythonMetrics: Map[String, SQLMetric],
     jobArtifactUUID: Option[String],
-    profiler: Option[String])
+    profiler: Option[String],
+    udfLogMaxEntries: Int,
+    udfLogLevel: String)
   extends BaseArrowPythonRunner(
     funcs, evalType, argOffsets, _schema, _timeZoneId, largeVarTypes, workerConf,
     pythonMetrics, jobArtifactUUID) {
 
   override protected def writeUDF(dataOut: DataOutputStream): Unit =
-    PythonUDFRunner.writeUDFs(dataOut, funcs, argOffsets, profiler)
+    PythonUDFRunner.writeUDFs(dataOut, funcs, argOffsets, profiler, udfLogMaxEntries, udfLogLevel)
 }
 
 /**
@@ -102,13 +104,15 @@ class ArrowPythonWithNamedArgumentRunner(
     workerConf: Map[String, String],
     pythonMetrics: Map[String, SQLMetric],
     jobArtifactUUID: Option[String],
-    profiler: Option[String])
+    profiler: Option[String],
+    udfLogMaxEntries: Int,
+    udfLogLevel: String)
   extends BaseArrowPythonRunner(
     funcs, evalType, argMetas.map(_.map(_.offset)), _schema, _timeZoneId, largeVarTypes, workerConf,
     pythonMetrics, jobArtifactUUID) {
 
   override protected def writeUDF(dataOut: DataOutputStream): Unit =
-    PythonUDFRunner.writeUDFs(dataOut, funcs, argMetas, profiler)
+    PythonUDFRunner.writeUDFs(dataOut, funcs, argMetas, profiler, udfLogMaxEntries, udfLogLevel)
 }
 
 object ArrowPythonRunner {
