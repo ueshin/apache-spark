@@ -474,6 +474,7 @@ class PandasOnSparkTestCase(ReusedSQLTestCase, PandasOnSparkTestUtils):
     def setUpClass(cls):
         super(PandasOnSparkTestCase, cls).setUpClass()
         cls.spark.conf.set(SPARK_CONF_ARROW_ENABLED, True)
+        cls.spark.conf.set("spark.sql.ansi.enabled", True)
 
 
 class TestUtils:
