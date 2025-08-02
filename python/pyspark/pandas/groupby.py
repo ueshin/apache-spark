@@ -36,6 +36,7 @@ from typing import (
     Set,
     Tuple,
     Type,
+    TypeVar,
     Union,
     cast,
     TYPE_CHECKING,
@@ -85,6 +86,7 @@ from pyspark.pandas.correlation import (
 )
 from pyspark.pandas.utils import (
     align_diff_frames,
+    ansi_mode_context,
     is_name_like_tuple,
     is_name_like_value,
     name_like_string,
@@ -98,6 +100,17 @@ from pyspark.pandas.exceptions import DataError
 
 if TYPE_CHECKING:
     from pyspark.pandas.window import RollingGroupby, ExpandingGroupby, ExponentialMovingGroupby
+
+
+FuncT = TypeVar("FuncT", bound=Callable[..., Any])
+
+
+def with_ansi_mode_context(f: FuncT) -> FuncT:
+    def wrapper(self: "GroupBy", *args: Any, **kwargs: Any) -> Any:
+        with ansi_mode_context(self._psdf._internal.spark_frame.sparkSession):
+            return f(self, *args, **kwargs)
+
+    return cast(FuncT, wrapper)
 
 
 # to keep it the same as pandas
@@ -3940,6 +3953,7 @@ class DataFrameGroupBy(GroupBy[DataFrame]):
         # Cast columns to ``"float64"`` to match `pandas.DataFrame.groupby`.
         return DataFrame(internal).astype("float64")
 
+    @with_ansi_mode_context
     def corr(
         self,
         method: str = "pearson",

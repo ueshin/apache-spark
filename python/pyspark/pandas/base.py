@@ -42,6 +42,7 @@ from pyspark.pandas.internal import (
 from pyspark.pandas.spark.accessors import SparkIndexOpsMethods
 from pyspark.pandas.typedef import extension_dtypes
 from pyspark.pandas.utils import (
+    ansi_mode_context,
     combine_frames,
     same_anchor,
     scol_for,
@@ -324,13 +325,16 @@ class IndexOpsMixin(object, metaclass=ABCMeta):
         return self._dtype_op.neg(self)
 
     def __add__(self, other: Any) -> SeriesOrIndex:
-        return self._dtype_op.add(self, other)
+        with ansi_mode_context(self._internal.spark_frame.sparkSession):
+            return self._dtype_op.add(self, other)
 
     def __sub__(self, other: Any) -> SeriesOrIndex:
-        return self._dtype_op.sub(self, other)
+        with ansi_mode_context(self._internal.spark_frame.sparkSession):
+            return self._dtype_op.sub(self, other)
 
     def __mul__(self, other: Any) -> SeriesOrIndex:
-        return self._dtype_op.mul(self, other)
+        with ansi_mode_context(self._internal.spark_frame.sparkSession):
+            return self._dtype_op.mul(self, other)
 
     def __truediv__(self, other: Any) -> SeriesOrIndex:
         """
@@ -350,19 +354,24 @@ class IndexOpsMixin(object, metaclass=ABCMeta):
         |          -10          |   null  | -np.inf |
         +-----------------------|---------|---------+
         """
-        return self._dtype_op.truediv(self, other)
+        with ansi_mode_context(self._internal.spark_frame.sparkSession):
+            return self._dtype_op.truediv(self, other)
 
     def __mod__(self, other: Any) -> SeriesOrIndex:
-        return self._dtype_op.mod(self, other)
+        with ansi_mode_context(self._internal.spark_frame.sparkSession):
+            return self._dtype_op.mod(self, other)
 
     def __radd__(self, other: Any) -> SeriesOrIndex:
-        return self._dtype_op.radd(self, other)
+        with ansi_mode_context(self._internal.spark_frame.sparkSession):
+            return self._dtype_op.radd(self, other)
 
     def __rsub__(self, other: Any) -> SeriesOrIndex:
-        return self._dtype_op.rsub(self, other)
+        with ansi_mode_context(self._internal.spark_frame.sparkSession):
+            return self._dtype_op.rsub(self, other)
 
     def __rmul__(self, other: Any) -> SeriesOrIndex:
-        return self._dtype_op.rmul(self, other)
+        with ansi_mode_context(self._internal.spark_frame.sparkSession):
+            return self._dtype_op.rmul(self, other)
 
     def __rtruediv__(self, other: Any) -> SeriesOrIndex:
         return self._dtype_op.rtruediv(self, other)
@@ -388,10 +397,12 @@ class IndexOpsMixin(object, metaclass=ABCMeta):
         return self._dtype_op.floordiv(self, other)
 
     def __rfloordiv__(self, other: Any) -> SeriesOrIndex:
-        return self._dtype_op.rfloordiv(self, other)
+        with ansi_mode_context(self._internal.spark_frame.sparkSession):
+            return self._dtype_op.rfloordiv(self, other)
 
     def __rmod__(self, other: Any) -> SeriesOrIndex:
-        return self._dtype_op.rmod(self, other)
+        with ansi_mode_context(self._internal.spark_frame.sparkSession):
+            return self._dtype_op.rmod(self, other)
 
     def __pow__(self, other: Any) -> SeriesOrIndex:
         return self._dtype_op.pow(self, other)
@@ -405,15 +416,17 @@ class IndexOpsMixin(object, metaclass=ABCMeta):
     # comparison operators
     def __eq__(self, other: Any) -> SeriesOrIndex:  # type: ignore[override]
         # pandas always returns False for all items with dict and set.
-        _exclude_pd_np_operand(other)
-        if isinstance(other, (dict, set)):
-            return self != self
-        else:
-            return self._dtype_op.eq(self, other)
+        with ansi_mode_context(self._internal.spark_frame.sparkSession):
+            _exclude_pd_np_operand(other)
+            if isinstance(other, (dict, set)):
+                return self != self
+            else:
+                return self._dtype_op.eq(self, other)
 
     def __ne__(self, other: Any) -> SeriesOrIndex:  # type: ignore[override]
-        _exclude_pd_np_operand(other)
-        return self._dtype_op.ne(self, other)
+        with ansi_mode_context(self._internal.spark_frame.sparkSession):
+            _exclude_pd_np_operand(other)
+            return self._dtype_op.ne(self, other)
 
     def __lt__(self, other: Any) -> SeriesOrIndex:
         _exclude_pd_np_operand(other)

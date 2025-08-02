@@ -24,6 +24,7 @@ from typing import (
     Dict,
     List,
     Optional,
+    TypeVar,
     Union,
     cast,
     no_type_check,
@@ -32,11 +33,22 @@ from typing import (
 import numpy as np
 import pandas as pd
 
-from pyspark.pandas.utils import is_ansi_mode_enabled
+from pyspark.pandas.utils import ansi_mode_context, is_ansi_mode_enabled
 from pyspark.sql.types import StringType, BinaryType, ArrayType, LongType, MapType
 from pyspark.sql import functions as F
 from pyspark.sql.functions import pandas_udf
 import pyspark.pandas as ps
+
+
+FuncT = TypeVar("FuncT", bound=Callable[..., Any])
+
+
+def with_ansi_mode_context(f: FuncT) -> FuncT:
+    def wrapper(self: "StringMethods", *args: Any, **kwargs: Any) -> Any:
+        with ansi_mode_context(self._data._internal.spark_frame.sparkSession):
+            return f(self, *args, **kwargs)
+
+    return cast(FuncT, wrapper)
 
 
 class StringMethods:
@@ -1890,6 +1902,7 @@ class StringMethods:
 
         return self._data.pandas_on_spark.transform_batch(pandas_slice_replace)
 
+    @with_ansi_mode_context
     def split(
         self, pat: Optional[str] = None, n: int = -1, expand: bool = False
     ) -> Union["ps.Series", "ps.DataFrame"]:
@@ -2052,6 +2065,7 @@ class StringMethods:
         else:
             return psser
 
+    @with_ansi_mode_context
     def rsplit(
         self, pat: Optional[str] = None, n: int = -1, expand: bool = False
     ) -> Union["ps.Series", "ps.DataFrame"]:
