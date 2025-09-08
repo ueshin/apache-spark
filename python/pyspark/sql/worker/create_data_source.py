@@ -42,6 +42,7 @@ from pyspark.worker_util import (
     setup_spark_files,
     utf8_deserializer,
 )
+from pyspark.logger.worker_io import capture_outputs
 
 
 def main(infile: IO, outfile: IO) -> None:
@@ -103,15 +104,20 @@ def main(infile: IO, outfile: IO) -> None:
                 },
             )
 
+        def context_provider() -> dict[str, str]:
+            return {"data_source_cls": data_source_cls.__name__}
+
         # Receive the provider name.
         provider = utf8_deserializer.loads(infile)
 
         # Check if the provider name matches the data source's name.
-        if provider.lower() != data_source_cls.name().lower():
+        with capture_outputs(context_provider=context_provider):
+            name = data_source_cls.name()
+        if provider.lower() != name.lower():
             raise PySparkAssertionError(
                 errorClass="DATA_SOURCE_TYPE_MISMATCH",
                 messageParameters={
-                    "expected": f"provider with name {data_source_cls.name()}",
+                    "expected": f"provider with name {name}",
                     "actual": f"'{provider}'",
                 },
             )
@@ -138,7 +144,8 @@ def main(infile: IO, outfile: IO) -> None:
             options[key] = value
 
         # Instantiate a data source.
-        data_source = data_source_cls(options=options)  # type: ignore
+        with capture_outputs(context_provider=context_provider):
+            data_source = data_source_cls(options=options)  # type: ignore
 
         # Get the schema of the data source.
         # If user_specified_schema is not None, use user_specified_schema.
@@ -146,7 +153,8 @@ def main(infile: IO, outfile: IO) -> None:
         # Throw exception if the data source does not implement schema().
         is_ddl_string = False
         if user_specified_schema is None:
-            schema = data_source.schema()
+            with capture_outputs(context_provider=context_provider):
+                schema = data_source.schema()
             if isinstance(schema, str):
                 # Here we cannot use _parse_datatype_string to parse the DDL string schema.
                 # as it requires an active Spark session.

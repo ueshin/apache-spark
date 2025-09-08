@@ -37,6 +37,7 @@ from pyspark.worker_util import (
     setup_memory_limits,
     setup_spark_files,
 )
+from pyspark.logger.worker_io import capture_outputs
 
 
 def main(infile: IO, outfile: IO) -> None:
@@ -93,10 +94,13 @@ def main(infile: IO, outfile: IO) -> None:
 
         # Commit or abort the Python data source write.
         # Note the commit messages can be None if there are failed tasks.
-        if abort:
-            writer.abort(commit_messages)
-        else:
-            writer.commit(commit_messages)
+        with capture_outputs(
+            context_provider=lambda: {"data_source_writer_cls": writer.__class__.__name__}
+        ):
+            if abort:
+                writer.abort(commit_messages)
+            else:
+                writer.commit(commit_messages)
 
         # Send a status code back to JVM.
         write_int(0, outfile)

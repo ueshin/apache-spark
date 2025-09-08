@@ -878,6 +878,114 @@ class BasePythonDataSourceTestsMixin:
                             "test_table"
                         )
 
+    def test_data_source_logging(self):
+        import json
+        import os
+        from dataclasses import dataclass
+
+        class TestJsonReader(DataSourceReader):
+            def __init__(self, options):
+                print("TestJsonReader.__init__")
+                self.options = options
+
+            def read(self, partition):
+                print("TestJsonReader.read")
+                path = self.options.get("path")
+                if path is None:
+                    raise Exception("path is not specified")
+                with open(path, "r") as file:
+                    for line in file.readlines():
+                        if line.strip():
+                            data = json.loads(line)
+                            yield data.get("name"), data.get("age")
+
+        @dataclass
+        class TestCommitMessage(WriterCommitMessage):
+            count: int
+
+        class TestJsonWriter(DataSourceWriter):
+            def __init__(self, options):
+                print("TestJsonWriter.__init__")
+                self.options = options
+                self.path = self.options.get("path")
+
+            def write(self, iterator):
+                print("TestJsonWriter.write")
+                from pyspark import TaskContext
+
+                context = TaskContext.get()
+                output_path = os.path.join(self.path, f"{context.partitionId()}.json")
+                count = 0
+                with open(output_path, "w") as file:
+                    for row in iterator:
+                        count += 1
+                        if "id" in row and row.id > 5:
+                            raise Exception("id > 5")
+                        file.write(json.dumps(row.asDict()) + "\n")
+                return TestCommitMessage(count=count)
+
+            def commit(self, messages):
+                print("TestJsonWriter.commit")
+                total_count = sum(message.count for message in messages)
+                with open(os.path.join(self.path, "_success.txt"), "a") as file:
+                    file.write(f"count: {total_count}\n")
+
+            def abort(self, messages):
+                print("TestJsonWriter.abort")
+                with open(os.path.join(self.path, "_failed.txt"), "a") as file:
+                    file.write("failed")
+
+        class TestJsonDataSource(DataSource):
+            @classmethod
+            def name(cls):
+                print("TestJsonDataSource.name")
+                return "my-json"
+
+            def schema(self):
+                print("TestJsonDataSource.schema")
+                return "name STRING, age INT"
+
+            def reader(self, schema) -> "DataSourceReader":
+                print("TestJsonDataSource.reader")
+                return TestJsonReader(self.options)
+
+            def writer(self, schema, overwrite):
+                print("TestJsonDataSource.writer")
+                return TestJsonWriter(self.options)
+
+        self.spark.dataSource.register(TestJsonDataSource)
+        path1 = os.path.join(SPARK_HOME, "python/test_support/sql/people.json")
+
+        with self.sql_conf({"spark.sql.pyspark.worker.logging.enabled": "true"}):
+            assertDataFrameEqual(
+                self.spark.read.format("my-json").load(path1),
+                [
+                    Row(name="Michael", age=None),
+                    Row(name="Andy", age=30),
+                    Row(name="Justin", age=19),
+                ],
+            )
+
+        logs = self.spark.read.format("python_worker_logs").load()
+
+        assertDataFrameEqual(
+            logs.select("level", "msg", "context.data_source_cls", "logger"),
+            [
+                Row(
+                    level="INFO",
+                    msg=msg,
+                    data_source_cls="TestJsonDataSource",
+                    logger="stdout",
+                )
+                for msg in [
+                    "TestJsonReader.__init__",
+                    "TestJsonDataSource.name",
+                    "TestJsonDataSource.schema",
+                    "TestJsonDataSource.reader",
+                ]
+            ],
+        )
+
 
 class PythonDataSourceTests(BasePythonDataSourceTestsMixin, ReusedSQLTestCase):
     ...

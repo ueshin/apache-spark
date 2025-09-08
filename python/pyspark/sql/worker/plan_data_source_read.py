@@ -57,6 +57,7 @@ from pyspark.worker_util import (
     setup_spark_files,
     utf8_deserializer,
 )
+from pyspark.logger.worker_io import capture_outputs
 
 
 def records_to_arrow_batches(
@@ -355,11 +356,17 @@ def main(infile: IO, outfile: IO) -> None:
 
         # Instantiate data source reader.
         if is_streaming:
-            reader: Union[DataSourceReader, DataSourceStreamReader] = _streamReader(
-                data_source, schema
-            )
+            with capture_outputs(
+                context_provider=lambda: {"data_source_cls": data_source.__class__.__name__}
+            ):
+                reader: Union[DataSourceReader, DataSourceStreamReader] = _streamReader(
+                    data_source, schema
+                )
         else:
-            reader = data_source.reader(schema=schema)
+            with capture_outputs(
+                context_provider=lambda: {"data_source_cls": data_source.__class__.__name__}
+            ):
+                reader = data_source.reader(schema=schema)
             # Validate the reader.
             if not isinstance(reader, DataSourceReader):
                 raise PySparkAssertionError(

@@ -15,20 +15,24 @@
  * limitations under the License.
  */
 
-package org.apache.spark.storage
+package org.apache.spark.sql.execution.datasources.python
 
-/**
- * Base class representing a log line.
- *
- * @param eventTime timestamp in milliseconds when the log is written
- * @param sequenceId sequence ID of the log line
- * @param message log message
- */
-trait LogLine {
-  def eventTime: Long
-  def sequenceId: Long
-  def message: String
+import org.apache.spark.sql.SQLContext
+import org.apache.spark.sql.classic.SparkSession
+import org.apache.spark.sql.sources.{
+  BaseRelation,
+  DataSourceRegister,
+  RelationProvider
 }
 
-case class PythonWorkerLogLine(eventTime: Long, sequenceId: Long, message: String)
-  extends LogLine
+class PythonWorkerLogRelationProvider extends RelationProvider with DataSourceRegister {
+
+  override def shortName(): String = "python_worker_logs"
+
+  override def createRelation(
+      sqlContext: SQLContext,
+      parameters: Map[String, String]): BaseRelation = {
+    val spark = sqlContext.sparkSession.asInstanceOf[SparkSession]
+    new PythonWorkerLogRelation(spark)
+  }
+}

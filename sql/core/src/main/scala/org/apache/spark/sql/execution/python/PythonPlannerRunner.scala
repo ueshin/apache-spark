@@ -33,6 +33,7 @@ import org.apache.spark.api.python.{BasePythonRunner, PythonFunction, PythonWork
 import org.apache.spark.internal.{Logging, LogKeys}
 import org.apache.spark.internal.config.BUFFER_SIZE
 import org.apache.spark.internal.config.Python._
+import org.apache.spark.sql.classic.SparkSession
 import org.apache.spark.sql.internal.SQLConf
 import org.apache.spark.util.DirectByteBufferOutputStream
 
@@ -94,6 +95,9 @@ abstract class PythonPlannerRunner[T](func: PythonFunction) extends Logging {
     }
 
     envVars.put("SPARK_JOB_ARTIFACT_UUID", jobArtifactUUID.getOrElse("default"))
+    if (SQLConf.get.pythonWorkerLoggingEnabled) {
+      envVars.put("SPARK_SESSION_UUID", SparkSession.active.sessionUUID)
+    }
 
     EvaluatePython.registerPicklers()
     val pickler = new Pickler(/* useMemo = */ true,
