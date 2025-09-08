@@ -47,3 +47,13 @@ trait LogBlockIdGenerator {
     blockId
   }
 }
+
+class PythonWorkerLogBlockIdGenerator(
+    workerId: String,
+    sessionId: String) extends LogBlockIdGenerator {
+
+  override def logBlockType: LogBlockType = LogBlockType.PYTHON_WORKER
+
+  override protected def genUniqueBlockId(lastLogTime: Long, executorId: String): LogBlockId =
+    PythonWorkerLogBlockId(lastLogTime, executorId, workerId, sessionId)
+}

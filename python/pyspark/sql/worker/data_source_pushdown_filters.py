@@ -58,6 +58,7 @@ from pyspark.worker_util import (
     setup_memory_limits,
     setup_spark_files,
 )
+from pyspark.logger.worker_io import capture_outputs
 
 utf8_deserializer = UTF8Deserializer()
 
@@ -175,6 +176,9 @@ def main(infile: IO, outfile: IO) -> None:
                 },
             )
 
+        def context_provider() -> dict[str, str]:
+            return {"data_source_cls": data_source.__class__.__name__}
+
         # Receive the data source output schema.
         schema_json = utf8_deserializer.loads(infile)
         schema = _parse_datatype_json_string(schema_json)
@@ -188,7 +192,9 @@ def main(infile: IO, outfile: IO) -> None:
             )
 
         # Get the reader.
-        reader = data_source.reader(schema=schema)
+        with capture_outputs(context_provider=context_provider):
+            reader = data_source.reader(schema=schema)
+
         # Validate the reader.
         if not isinstance(reader, DataSourceReader):
             raise PySparkAssertionError(
@@ -205,9 +211,10 @@ def main(infile: IO, outfile: IO) -> None:
         filters = [FilterRef(deserializeFilter(f)) for f in filter_dicts]
 
         # Push down the filters and get the indices of the unsupported filters.
-        unsupported_filters = set(
-            FilterRef(f) for f in reader.pushFilters([ref.filter for ref in filters])
-        )
+        with capture_outputs(context_provider=context_provider):
+            unsupported_filters = set(
+                FilterRef(f) for f in reader.pushFilters([ref.filter for ref in filters])
+            )
         supported_filter_indices = []
         for i, filter in enumerate(filters):
             if filter in unsupported_filters:

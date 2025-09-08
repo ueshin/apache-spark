@@ -45,6 +45,7 @@ from pyspark.worker_util import (
     setup_spark_files,
     utf8_deserializer,
 )
+from pyspark.logger.worker_io import capture_outputs
 
 
 def main(infile: IO, outfile: IO) -> None:
@@ -88,6 +89,10 @@ def main(infile: IO, outfile: IO) -> None:
                     "actual": f"'{type(data_source).__name__}'",
                 },
             )
+
+        def context_provider() -> dict[str, str]:
+            return {"data_source_cls": data_source.__class__.__name__}
+
         # Receive the data source output schema.
         schema_json = utf8_deserializer.loads(infile)
         schema = _parse_datatype_json_string(schema_json)
@@ -101,8 +106,10 @@ def main(infile: IO, outfile: IO) -> None:
             )
         # Receive the `overwrite` flag.
         overwrite = read_bool(infile)
+
         # Create the data source writer instance.
-        writer = data_source.streamWriter(schema=schema, overwrite=overwrite)
+        with capture_outputs(context_provider=context_provider):
+            writer = data_source.streamWriter(schema=schema, overwrite=overwrite)
         # Receive the commit messages.
         num_messages = read_int(infile)
 
@@ -124,10 +131,11 @@ def main(infile: IO, outfile: IO) -> None:
 
         # Commit or abort the Python data source write.
         # Note the commit messages can be None if there are failed tasks.
-        if abort:
-            writer.abort(commit_messages, batch_id)
-        else:
-            writer.commit(commit_messages, batch_id)
+        with capture_outputs(context_provider=context_provider):
+            if abort:
+                writer.abort(commit_messages, batch_id)
+            else:
+                writer.commit(commit_messages, batch_id)
         # Send a status code back to JVM.
         write_int(0, outfile)
         outfile.flush()

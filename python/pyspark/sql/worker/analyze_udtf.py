@@ -45,6 +45,7 @@ from pyspark.worker_util import (
     setup_spark_files,
     utf8_deserializer,
 )
+from pyspark.logger.worker_io import capture_outputs
 
 
 def read_udtf(infile: IO) -> type:
@@ -154,8 +155,19 @@ def main(infile: IO, outfile: IO) -> None:
                 )
             )
 
+        if udtf_name == handler.__name__:
+
+            def context_provider() -> dict[str, str]:
+                return {"udtf_name": udtf_name}
+
+        else:
+
+            def context_provider() -> dict[str, str]:
+                return {"udtf_name": udtf_name, "udtf_class": handler.__name__}
+
         # Invoke the UDTF's 'analyze' method.
-        result = handler.analyze(*args, **kwargs)  # type: ignore[attr-defined]
+        with capture_outputs(context_provider=context_provider):
+            result = handler.analyze(*args, **kwargs)  # type: ignore[attr-defined]
 
         # Check invariants about the 'analyze' method after running it.
         if not isinstance(result, AnalyzeResult):

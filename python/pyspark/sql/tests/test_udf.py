@@ -25,6 +25,8 @@ import datetime
 import io
 import time
 from contextlib import redirect_stdout
+import logging
+import sys
 
 from pyspark.sql import SparkSession, Column, Row
 from pyspark.sql.functions import col, udf, assert_true, lit, rand
@@ -1445,6 +1447,41 @@ class BaseUDFTestsMixin(object):
                     return return_value
 
                 self.spark.range(1).select(my_udf().alias("result")).show()
+
+    def test_udf_with_logging(self):
+        @udf
+        def my_udf():
+            logger = logging.getLogger("test")
+            print("print to stdout", file=sys.stdout)
+            print("print to stderr", file=sys.stderr)
+            try:
+                1 / 0
+            except Exception:
+                logger.exception("exception")
+            return "x"
+
+        assertDataFrameEqual(
+            self.spark.range(1).select(my_udf().alias("result")), [Row(result="x")]
+        )
+        assertDataFrameEqual(self.spark.read.format("python_worker_logs").load(), [])
+
+        with self.sql_conf({"spark.sql.pyspark.worker.logging.enabled": "true"}):
+            assertDataFrameEqual(
+                self.spark.range(1).select(my_udf().alias("result")), [Row(result="x")]
+            )
+
+        logs = self.spark.read.format("python_worker_logs").load()
+
+        assertDataFrameEqual(
+            logs.select("level", "msg", "context", "logger"),
+            [
+                Row(level="INFO", msg="print to stdout", context={}, logger="stdout"),
+                Row(level="ERROR", msg="print to stderr", context={}, logger="stderr"),
+                Row(level="ERROR", msg="exception", context={}, logger="test"),
+            ],
+        )
+
+        self.assertEqual(logs.where("exception is not null").select("exception").count(), 1)
 
 
 class UDFTests(BaseUDFTestsMixin, ReusedSQLTestCase):

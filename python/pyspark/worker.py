@@ -93,6 +93,7 @@ from pyspark.worker_util import (
     setup_spark_files,
     utf8_deserializer,
 )
+from pyspark.logger.worker_io import capture_outputs
 
 try:
     import memory_profiler  # noqa: F401
@@ -3162,10 +3163,11 @@ def main(infile, outfile):
                 if hasattr(out_iter, "close"):
                     out_iter.close()
 
-        if profiler:
-            profiler.profile(process)
-        else:
-            process()
+        with capture_outputs():
+            if profiler:
+                profiler.profile(process)
+            else:
+                process()
 
         # Reset task context to None. This is a guard code to avoid residual context when worker
         # reuse.

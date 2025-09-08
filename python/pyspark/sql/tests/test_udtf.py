@@ -23,6 +23,8 @@ import unittest
 import time
 from dataclasses import dataclass
 from typing import Iterator, Optional
+import logging
+import sys
 
 from pyspark.errors import (
     PySparkAttributeError,
@@ -3043,6 +3045,123 @@ class BaseUDTFTestsMixin:
         ]
         for idx, field in enumerate(result_df.schema.fields):
             self.assertEqual(field.dataType, expected_output_types[idx])
+
+    def test_udtf_with_logging(self):
+        @udtf
+        class TestUDTF_AnalyzeWithLogging:
+            @staticmethod
+            def analyze(x):
+                logger = logging.getLogger("test")
+                print(f"print to stdout: {x.value}", file=sys.stdout)
+                print(f"print to stderr: {x.value}", file=sys.stderr)
+                try:
+                    1 / 0
+                except Exception:
+                    logger.exception(f"exception: {x.value}")
+                return AnalyzeResult(StructType().add("x", StringType()))
+
+            def eval(self, x):
+                print(f"TestUDTF_AnalyzeWithLogging.eval: {x}")
+                yield str(x),
+
+        self.spark.udtf.register("test_udtf_analyze_with_logging", TestUDTF_AnalyzeWithLogging)
+
+        assertDataFrameEqual(TestUDTF_AnalyzeWithLogging(lit(0)), [Row(x="0")])
+        assertDataFrameEqual(self.spark.read.format("python_worker_logs").load(), [])
+
+        with self.sql_conf({"spark.sql.pyspark.worker.logging.enabled": "true"}):
+            assertDataFrameEqual(TestUDTF_AnalyzeWithLogging(lit(1)), [Row(x="1")])
+            assertDataFrameEqual(
+                self.spark.sql("SELECT * FROM test_udtf_analyze_with_logging(2)"), [Row(x="2")]
+            )
+
+        logs = (
+            self.spark.read.format("python_worker_logs")
+            .load()
+            .where("context.udtf_name == 'TestUDTF_AnalyzeWithLogging'")
+        )
+
+        assertDataFrameEqual(
+            logs.select("level", "msg", "context.udtf_name", "logger").distinct(),
+            [
+                Row(
+                    level="INFO",
+                    message="print to stdout: 1",
+                    udtf_name="TestUDTF_AnalyzeWithLogging",
+                    logger="stdout",
+                ),
+                Row(
+                    level="ERROR",
+                    message="print to stderr: 1",
+                    udtf_name="TestUDTF_AnalyzeWithLogging",
+                    logger="stderr",
+                ),
+                Row(
+                    level="ERROR",
+                    message="exception: 1",
+                    udtf_name="TestUDTF_AnalyzeWithLogging",
+                    logger="test",
+                ),
+            ],
+        )
+
+        self.assertEqual(
+            logs.where("exception is not null").select("exception").distinct().count(), 1
+        )
+
+        logs = (
+            self.spark.read.format("python_worker_logs")
+            .load()
+            .where("context.udtf_name == 'test_udtf_analyze_with_logging'")
+        )
+
+        assertDataFrameEqual(
+            logs.select(
+                "level", "msg", "context.udtf_name", "context.udtf_class", "logger"
+            ).distinct(),
+            [
+                Row(
+                    level="INFO",
+                    message="print to stdout: 2",
+                    udtf_name="test_udtf_analyze_with_logging",
+                    udtf_class="TestUDTF_AnalyzeWithLogging",
+                    logger="stdout",
+                ),
+                Row(
+                    level="ERROR",
+                    message="print to stderr: 2",
+                    udtf_name="test_udtf_analyze_with_logging",
+                    udtf_class="TestUDTF_AnalyzeWithLogging",
+                    logger="stderr",
+                ),
+                Row(
+                    level="ERROR",
+                    message="exception: 2",
+                    udtf_name="test_udtf_analyze_with_logging",
+                    udtf_class="TestUDTF_AnalyzeWithLogging",
+                    logger="test",
+                ),
+            ],
+        )
+
+        self.assertEqual(
+            logs.where("exception is not null").select("exception").distinct().count(), 1
+        )
+
+        logs = self.spark.read.format("python_worker_logs").load().where("contains(msg, 'eval')")
+
+        assertDataFrameEqual(
+            logs.select("level", "msg", "context", "logger"),
+            [
+                Row(
+                    level="INFO",
+                    msg=f"TestUDTF_AnalyzeWithLogging.eval: {i + 1}",
+                    context={},
+                    logger="stdout",
+                )
+                for i in range(2)
+            ],
+        )
 
 
 class UDTFTests(BaseUDTFTestsMixin, ReusedSQLTestCase):
