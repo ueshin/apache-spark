@@ -17,6 +17,8 @@
 package org.apache.spark.sql.execution.datasources.v2.python
 
 import org.apache.spark.JobArtifactSet
+import org.apache.spark.sql.catalyst.SQLConfHelper
+import org.apache.spark.sql.classic.SparkSession
 import org.apache.spark.sql.connector.metric.CustomMetric
 import org.apache.spark.sql.connector.write.{BatchWrite, _}
 import org.apache.spark.sql.connector.write.streaming.StreamingWrite
@@ -50,12 +52,15 @@ class PythonBatchWrite(
     shortName: String,
     info: LogicalWriteInfo,
     isTruncate: Boolean
-  ) extends BatchWrite {
+  ) extends BatchWrite with SQLConfHelper {
 
   // Store the pickled data source writer instance.
   private var pythonDataSourceWriter: Array[Byte] = _
 
   private[this] val jobArtifactUUID = JobArtifactSet.getCurrentJobArtifactState.map(_.uuid)
+  private[this] val sessionUUID = if (conf.pythonWorkerLoggingEnabled) {
+    Some(SparkSession.active.sessionUUID)
+  } else None
 
   override def createBatchWriterFactory(physicalInfo: PhysicalWriteInfo): DataWriterFactory =
   {
@@ -68,7 +73,8 @@ class PythonBatchWrite(
 
     pythonDataSourceWriter = writeInfo.writer
 
-    PythonBatchWriterFactory(ds.source, writeInfo.func, info.schema(), jobArtifactUUID)
+    PythonBatchWriterFactory(ds.source, writeInfo.func, info.schema(),
+      jobArtifactUUID, sessionUUID)
   }
 
   override def commit(messages: Array[WriterCommitMessage]): Unit = {

@@ -17,7 +17,8 @@
 package org.apache.spark.sql.execution.datasources.v2.python
 
 import org.apache.spark.JobArtifactSet
-import org.apache.spark.sql.catalyst.InternalRow
+import org.apache.spark.sql.catalyst.{InternalRow, SQLConfHelper}
+import org.apache.spark.sql.classic.SparkSession
 import org.apache.spark.sql.connector.write._
 import org.apache.spark.sql.connector.write.streaming.{StreamingDataWriterFactory, StreamingWrite}
 import org.apache.spark.sql.types.StructType
@@ -30,12 +31,15 @@ class PythonStreamingWrite(
     ds: PythonDataSourceV2,
     shortName: String,
     info: LogicalWriteInfo,
-    isTruncate: Boolean) extends StreamingWrite {
+    isTruncate: Boolean) extends StreamingWrite with SQLConfHelper {
 
   // Store the pickled data source writer instance.
   private var pythonDataSourceWriter: Array[Byte] = _
 
   private[this] val jobArtifactUUID = JobArtifactSet.getCurrentJobArtifactState.map(_.uuid)
+  private[this] val sessionUUID = if (conf.pythonWorkerLoggingEnabled) {
+    Some(SparkSession.active.sessionUUID)
+  } else None
 
   private def createDataSourceFunc =
     ds.source.createPythonFunction(
@@ -53,7 +57,8 @@ class PythonStreamingWrite(
 
     pythonDataSourceWriter = writeInfo.writer
 
-    new PythonStreamingWriterFactory(ds.source, writeInfo.func, info.schema(), jobArtifactUUID)
+    new PythonStreamingWriterFactory(ds.source, writeInfo.func, info.schema(),
+      jobArtifactUUID, sessionUUID)
   }
 
   override def commit(epochId: Long, messages: Array[WriterCommitMessage]): Unit = {
@@ -81,8 +86,10 @@ class PythonStreamingWriterFactory(
     source: UserDefinedPythonDataSource,
     pickledWriteFunc: Array[Byte],
     inputSchema: StructType,
-    jobArtifactUUID: Option[String])
-  extends PythonBatchWriterFactory(source, pickledWriteFunc, inputSchema, jobArtifactUUID)
+    jobArtifactUUID: Option[String],
+    sessionUUID: Option[String])
+  extends PythonBatchWriterFactory(source, pickledWriteFunc, inputSchema,
+      jobArtifactUUID, sessionUUID)
     with StreamingDataWriterFactory {
   override def createWriter(
       partitionId: Int,

@@ -17,6 +17,8 @@
 package org.apache.spark.sql.execution.datasources.v2.python
 
 import org.apache.spark.JobArtifactSet
+import org.apache.spark.sql.catalyst.SQLConfHelper
+import org.apache.spark.sql.classic.SparkSession
 import org.apache.spark.sql.connector.metric.CustomMetric
 import org.apache.spark.sql.connector.read._
 import org.apache.spark.sql.connector.read.streaming.MicroBatchStream
@@ -59,8 +61,11 @@ class PythonBatch(
     ds: PythonDataSourceV2,
     shortName: String,
     outputSchema: StructType,
-    options: CaseInsensitiveStringMap) extends Batch {
+    options: CaseInsensitiveStringMap) extends Batch with SQLConfHelper {
   private val jobArtifactUUID = JobArtifactSet.getCurrentJobArtifactState.map(_.uuid)
+  private val sessionUUID = if (conf.pythonWorkerLoggingEnabled) {
+    Some(SparkSession.active.sessionUUID)
+  } else None
 
   private lazy val infoInPython: PythonDataSourceReadInfo = {
     ds.getOrCreateReadInfo(shortName, options, outputSchema, isStreaming = false)
@@ -72,6 +77,6 @@ class PythonBatch(
   override def createReaderFactory(): PartitionReaderFactory = {
     val readerFunc = infoInPython.func
     new PythonPartitionReaderFactory(
-      ds.source, readerFunc, outputSchema, jobArtifactUUID)
+      ds.source, readerFunc, outputSchema, jobArtifactUUID, sessionUUID)
   }
 }

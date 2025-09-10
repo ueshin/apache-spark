@@ -18,6 +18,7 @@
 package org.apache.spark.sql.execution.python.streaming
 
 import java.io._
+import java.util
 
 import scala.jdk.CollectionConverters._
 
@@ -64,12 +65,20 @@ class ApplyInPandasWithStatePythonRunner(
     outputSchema: StructType,
     stateValueSchema: StructType,
     override val pythonMetrics: Map[String, SQLMetric],
-    jobArtifactUUID: Option[String])
+    jobArtifactUUID: Option[String],
+    sessionUUID: Option[String])
   extends BasePythonRunner[InType, OutType](
     funcs.map(_._1), evalType, argOffsets, jobArtifactUUID, pythonMetrics)
   with PythonArrowInput[InType]
   with PythonArrowOutput[OutType] {
 
+  override val envVars: util.Map[String, String] = {
+    val envVars = new util.HashMap(funcs.head._1.funcs.head.envVars)
+    sessionUUID.foreach { uuid =>
+      envVars.put("SPARK_SESSION_UUID", uuid)
+    }
+    envVars
+  }
   override val pythonExec: String =
     SQLConf.get.pysparkWorkerPythonExecutable.getOrElse(
       funcs.head._1.funcs.head.pythonExec)
