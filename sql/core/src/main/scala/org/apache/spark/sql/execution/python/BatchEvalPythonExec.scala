@@ -51,8 +51,8 @@ case class BatchEvalPythonExec(udfs: Seq[PythonUDF], resultAttrs: Seq[Attribute]
       batchSize,
       pythonMetrics,
       jobArtifactUUID,
-      conf.pythonUDFProfiler,
-      sessionUUID)
+      sessionUUID,
+      conf.pythonUDFProfiler)
   }
 
   override protected def withNewChildInternal(newChild: SparkPlan): BatchEvalPythonExec =
@@ -66,8 +66,8 @@ class BatchEvalPythonEvaluatorFactory(
     batchSize: Int,
     pythonMetrics: Map[String, SQLMetric],
     jobArtifactUUID: Option[String],
-    profiler: Option[String],
-    sessionUUID: Option[String])
+    sessionUUID: Option[String],
+    profiler: Option[String])
   extends EvalPythonEvaluatorFactory(childOutput, udfs, output) {
 
   override def evaluate(
@@ -84,8 +84,8 @@ class BatchEvalPythonEvaluatorFactory(
     // Output iterator for results from Python.
     val outputIterator =
       new PythonUDFWithNamedArgumentsRunner(
-        funcs, PythonEvalType.SQL_BATCHED_UDF, argMetas, pythonMetrics, jobArtifactUUID, profiler,
-        sessionUUID)
+        funcs, PythonEvalType.SQL_BATCHED_UDF, argMetas, pythonMetrics, jobArtifactUUID,
+        sessionUUID, profiler)
       .compute(inputIterator, context.partitionId(), context)
 
     val unpickle = new Unpickler

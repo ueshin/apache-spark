@@ -144,6 +144,9 @@ case class ArrowAggregatePythonExec(
 
 
     val jobArtifactUUID = JobArtifactSet.getCurrentJobArtifactState.map(_.uuid)
+    val sessionUUID = if (conf.pythonWorkerLoggingEnabled) {
+      Some(session.sessionUUID)
+    } else None
 
     // Map grouped rows to ArrowPythonRunner results, Only execute if partition is not empty
     inputRDD.mapPartitionsInternal { iter => if (iter.isEmpty) iter else {
@@ -190,6 +193,7 @@ case class ArrowAggregatePythonExec(
         pythonRunnerConf,
         pythonMetrics,
         jobArtifactUUID,
+        sessionUUID,
         conf.pythonUDFProfiler).compute(projectedRowIter, context.partitionId(), context)
 
       val joinedAttributes =

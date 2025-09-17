@@ -68,7 +68,7 @@ class ArrowPythonUDTFRunner(
   }
 
   override val envVars: util.Map[String, String] = {
-    val envVars = funcs.head.funcs.head.envVars
+    val envVars = new util.HashMap(funcs.head.funcs.head.envVars)
     sessionUUID.foreach { uuid =>
       envVars.put("SPARK_SESSION_UUID", uuid)
     }

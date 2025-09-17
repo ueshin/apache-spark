@@ -41,7 +41,7 @@ abstract class BasePythonUDFRunner(
     funcs.map(_._1), evalType, argOffsets, jobArtifactUUID, pythonMetrics) {
 
   override val envVars: util.Map[String, String] = {
-    val envVars = funcs.head._1.funcs.head.envVars
+    val envVars = new util.HashMap(funcs.head._1.funcs.head.envVars)
     sessionUUID.foreach { uuid =>
       envVars.put("SPARK_SESSION_UUID", uuid)
     }
@@ -135,8 +135,8 @@ class PythonUDFRunner(
     argOffsets: Array[Array[Int]],
     pythonMetrics: Map[String, SQLMetric],
     jobArtifactUUID: Option[String],
-    profiler: Option[String],
-    sessionUUID: Option[String])
+    sessionUUID: Option[String],
+    profiler: Option[String])
   extends BasePythonUDFRunner(funcs, evalType, argOffsets, pythonMetrics, jobArtifactUUID,
     sessionUUID) {
 
@@ -151,8 +151,8 @@ class PythonUDFWithNamedArgumentsRunner(
     argMetas: Array[Array[ArgumentMetadata]],
     pythonMetrics: Map[String, SQLMetric],
     jobArtifactUUID: Option[String],
-    profiler: Option[String],
-    sessionUUID: Option[String])
+    sessionUUID: Option[String],
+    profiler: Option[String])
   extends BasePythonUDFRunner(
     funcs, evalType, argMetas.map(_.map(_.offset)), pythonMetrics, jobArtifactUUID,
     sessionUUID) {

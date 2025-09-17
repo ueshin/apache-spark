@@ -91,6 +91,10 @@ case class ArrowWindowPythonExec(
     "spillSize" -> SQLMetrics.createSizeMetric(sparkContext, "spill size")
   )
 
+  private[this] val sessionUUID = if (conf.pythonWorkerLoggingEnabled) {
+    Some(session.sessionUUID)
+  } else None
+
   protected override def doExecute(): RDD[InternalRow] = {
     val evaluatorFactory =
       new ArrowWindowPythonEvaluatorFactory(
@@ -101,6 +105,7 @@ case class ArrowWindowPythonExec(
         evalType,
         longMetric("spillSize"),
         pythonMetrics,
+        sessionUUID,
         conf.pythonUDFProfiler)
 
     // Start processing.
