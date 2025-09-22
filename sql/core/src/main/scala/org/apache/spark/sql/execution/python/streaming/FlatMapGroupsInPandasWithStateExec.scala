@@ -77,9 +77,12 @@ case class FlatMapGroupsInPandasWithStateExec(
   override protected val initialState: SparkPlan = null
   override protected val hasInitialState: Boolean = false
   private[this] val jobArtifactUUID = JobArtifactSet.getCurrentJobArtifactState.map(_.uuid)
-  private[this] val sessionUUID = if (conf.pythonWorkerLoggingEnabled) {
-    Some(session.sessionUUID)
-  } else None
+  private[this] val sessionUUID = {
+    Option(session).collect {
+      case session if session.sessionState.conf.pythonWorkerLoggingEnabled =>
+        session.sessionUUID
+    }
+  }
 
   override protected val stateEncoder: ExpressionEncoder[Any] =
     ExpressionEncoder(stateType).resolveAndBind().asInstanceOf[ExpressionEncoder[Any]]

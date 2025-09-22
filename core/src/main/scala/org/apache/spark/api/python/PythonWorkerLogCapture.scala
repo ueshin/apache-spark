@@ -133,7 +133,7 @@ private[python] class PythonWorkerLogCapture(
       }
       prefix
     } else {
-      line + "\n"
+      line + System.lineSeparator()
     }
   }
 
@@ -173,7 +173,7 @@ private[python] class PythonWorkerLogCapture(
           val processedContent = if (line.contains(s"$logMarker:")) {
             processLogLine(line)
           } else {
-            line + "\n"
+            line + System.lineSeparator()
           }
 
           buffer = ByteBuffer.wrap(processedContent.getBytes(StandardCharsets.ISO_8859_1))

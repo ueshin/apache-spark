@@ -68,9 +68,12 @@ trait FlatMapCoGroupsInBatchExec extends SparkPlan with BinaryExecNode with Pyth
     val (leftDedup, leftArgOffsets) = resolveArgOffsets(left.output, leftGroup)
     val (rightDedup, rightArgOffsets) = resolveArgOffsets(right.output, rightGroup)
     val jobArtifactUUID = JobArtifactSet.getCurrentJobArtifactState.map(_.uuid)
-    val sessionUUID = if (conf.pythonWorkerLoggingEnabled) {
-      Some(session.sessionUUID)
-    } else None
+    val sessionUUID = {
+      Option(session).collect {
+        case session if session.sessionState.conf.pythonWorkerLoggingEnabled =>
+          session.sessionUUID
+      }
+    }
 
     // Map cogrouped rows to ArrowPythonRunner results, Only execute if partition is not empty
     left.execute().zipPartitions(right.execute())  { (leftData, rightData) =>

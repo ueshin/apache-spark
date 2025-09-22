@@ -51,9 +51,12 @@ case class BatchEvalPythonUDTFExec(
   extends EvalPythonUDTFExec with PythonSQLMetrics {
 
   private[this] val jobArtifactUUID = JobArtifactSet.getCurrentJobArtifactState.map(_.uuid)
-  private[this] val sessionUUID = if (conf.pythonWorkerLoggingEnabled) {
-    Some(session.sessionUUID)
-  } else None
+  private[this] val sessionUUID = {
+    Option(session).collect {
+      case session if session.sessionState.conf.pythonWorkerLoggingEnabled =>
+        session.sessionUUID
+    }
+  }
 
   /**
    * Evaluates a Python UDTF. It computes the results using the PythonUDFRunner, and returns

@@ -53,9 +53,12 @@ case class ArrowEvalPythonUDTFExec(
   private val largeVarTypes = conf.arrowUseLargeVarTypes
   private val pythonRunnerConf = ArrowPythonRunner.getPythonRunnerConfMap(conf)
   private[this] val jobArtifactUUID = JobArtifactSet.getCurrentJobArtifactState.map(_.uuid)
-  private[this] val sessionUUID = if (conf.pythonWorkerLoggingEnabled) {
-    Some(session.sessionUUID)
-  } else None
+  private[this] val sessionUUID = {
+    Option(session).collect {
+      case session if session.sessionState.conf.pythonWorkerLoggingEnabled =>
+        session.sessionUUID
+    }
+  }
 
   override protected def evaluate(
       argMetas: Array[ArgumentMetadata],

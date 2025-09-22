@@ -82,9 +82,12 @@ case class ArrowEvalPythonExec(
   }
 
   private[this] val jobArtifactUUID = JobArtifactSet.getCurrentJobArtifactState.map(_.uuid)
-  private[this] val sessionUUID = if (conf.pythonWorkerLoggingEnabled) {
-    Some(session.sessionUUID)
-  } else None
+  private[this] val sessionUUID = {
+    Option(session).collect {
+      case session if session.sessionState.conf.pythonWorkerLoggingEnabled =>
+        session.sessionUUID
+    }
+  }
 
   override protected def evaluatorFactory: EvalPythonEvaluatorFactory = {
     new ArrowEvalPythonEvaluatorFactory(

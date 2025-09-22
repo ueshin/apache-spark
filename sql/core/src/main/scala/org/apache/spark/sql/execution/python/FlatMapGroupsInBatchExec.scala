@@ -48,9 +48,12 @@ trait FlatMapGroupsInBatchExec extends SparkPlan with UnaryExecNode with PythonS
   private val chainedFunc =
     Seq((ChainedPythonFunctions(Seq(pythonFunction)), pythonUDF.resultId.id))
   private[this] val jobArtifactUUID = JobArtifactSet.getCurrentJobArtifactState.map(_.uuid)
-  private[this] val sessionUUID = if (conf.pythonWorkerLoggingEnabled) {
-    Some(session.sessionUUID)
-  } else None
+  private[this] val sessionUUID = {
+    Option(session).collect {
+      case session if session.sessionState.conf.pythonWorkerLoggingEnabled =>
+        session.sessionUUID
+    }
+  }
 
   override def producedAttributes: AttributeSet = AttributeSet(output)
 
