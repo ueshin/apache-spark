@@ -25,6 +25,8 @@ import datetime
 import io
 import time
 from contextlib import redirect_stdout
+import logging
+import sys
 
 from pyspark.sql import SparkSession, Column, Row
 from pyspark.sql.functions import col, udf, assert_true, lit, rand
@@ -52,6 +54,7 @@ from pyspark.testing.sqlutils import (
     test_not_compiled_message,
 )
 from pyspark.testing.utils import assertDataFrameEqual, timeout
+from pyspark.util import is_remote_only
 
 
 class BaseUDFTestsMixin(object):
@@ -1445,6 +1448,43 @@ class BaseUDFTestsMixin(object):
                     return return_value
 
                 self.spark.range(1).select(my_udf().alias("result")).show()
+
+    @unittest.skipIf(is_remote_only(), "Requires JVM access")
+    def test_udf_with_logging(self):
+        @udf
+        def my_udf():
+            logger = logging.getLogger("test")
+            print("print to stdout ❤", file=sys.stdout)
+            print("print to stderr 😀", file=sys.stderr)
+            try:
+                1 / 0
+            except Exception:
+                logger.exception("exception")
+            return "x"
+
+        # Logging is disabled by default
+        assertDataFrameEqual(
+            self.spark.range(1).select(my_udf().alias("result")), [Row(result="x")]
+        )
+        self.assertEqual(self.spark.table("system.session.python_worker_logs").count(), 0)
+
+        with self.sql_conf({"spark.sql.pyspark.worker.logging.enabled": "true"}):
+            assertDataFrameEqual(
+                self.spark.range(1).select(my_udf().alias("result")), [Row(result="x")]
+            )
+
+        logs = self.spark.table("system.session.python_worker_logs")
+
+        assertDataFrameEqual(
+            logs.select("level", "msg", "logger"),
+            [
+                Row(level="INFO", msg="print to stdout ❤", logger="stdout"),
+                Row(level="ERROR", msg="print to stderr 😀", logger="stderr"),
+                Row(level="ERROR", msg="exception", logger="test"),
+            ],
+        )
+
+        self.assertEqual(logs.where("exception is not null").select("exception").count(), 1)
 
 
 class UDFTests(BaseUDFTestsMixin, ReusedSQLTestCase):

@@ -38,6 +38,7 @@ import org.apache.spark.rdd.RDD
 import org.apache.spark.scheduler.{SparkListener, SparkListenerApplicationEnd}
 import org.apache.spark.sql
 import org.apache.spark.sql.{Artifact, DataSourceRegistration, Encoder, Encoders, ExperimentalMethods, Row, SparkSessionBuilder, SparkSessionCompanion, SparkSessionExtensions, SparkSessionExtensionsProvider, UDTFRegistration}
+import org.apache.spark.sql.api.python.PythonSQLUtils
 import org.apache.spark.sql.artifact.ArtifactManager
 import org.apache.spark.sql.catalyst._
 import org.apache.spark.sql.catalyst.analysis.{GeneralParameterizedQuery, NameParameterizedQuery, PosParameterizedQuery, UnresolvedRelation}
@@ -757,6 +758,16 @@ class SparkSession private(
   private[sql] lazy val observationManager = new ObservationManager(this)
 
   override private[sql] def isUsable: Boolean = !sparkContext.isStopped
+
+  /**
+   * Cleans up Python worker logs.
+   *
+   * It is used by PySpark tests or Spark Connect when the session is closed.
+   */
+  private[sql] def cleanupPythonWorkerLogs(): Unit = {
+    PythonSQLUtils.cleanupPythonWorkerLogs(
+      sessionUUID, sparkContext.env.blockManager.master)
+  }
 }
 
 
