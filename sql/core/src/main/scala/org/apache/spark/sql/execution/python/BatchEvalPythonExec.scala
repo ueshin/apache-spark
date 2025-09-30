@@ -38,6 +38,12 @@ case class BatchEvalPythonExec(udfs: Seq[PythonUDF], resultAttrs: Seq[Attribute]
   extends EvalPythonExec with PythonSQLMetrics {
 
   private[this] val jobArtifactUUID = JobArtifactSet.getCurrentJobArtifactState.map(_.uuid)
+  private[this] val sessionUUID = {
+    Option(session).collect {
+      case session if session.sessionState.conf.pythonWorkerLoggingEnabled =>
+        session.sessionUUID
+    }
+  }
 
   override protected def evaluatorFactory: EvalPythonEvaluatorFactory = {
     val batchSize = conf.getConf(SQLConf.PYTHON_UDF_MAX_RECORDS_PER_BATCH)
@@ -48,6 +54,7 @@ case class BatchEvalPythonExec(udfs: Seq[PythonUDF], resultAttrs: Seq[Attribute]
       batchSize,
       pythonMetrics,
       jobArtifactUUID,
+      sessionUUID,
       conf.pythonUDFProfiler)
   }
 
@@ -62,6 +69,7 @@ class BatchEvalPythonEvaluatorFactory(
     batchSize: Int,
     pythonMetrics: Map[String, SQLMetric],
     jobArtifactUUID: Option[String],
+    sessionUUID: Option[String],
     profiler: Option[String])
   extends EvalPythonEvaluatorFactory(childOutput, udfs, output) {
 
@@ -79,7 +87,8 @@ class BatchEvalPythonEvaluatorFactory(
     // Output iterator for results from Python.
     val outputIterator =
       new PythonUDFWithNamedArgumentsRunner(
-        funcs, PythonEvalType.SQL_BATCHED_UDF, argMetas, pythonMetrics, jobArtifactUUID, profiler)
+        funcs, PythonEvalType.SQL_BATCHED_UDF, argMetas, pythonMetrics,
+        jobArtifactUUID, sessionUUID, profiler)
       .compute(inputIterator, context.partitionId(), context)
 
     val unpickle = new Unpickler
