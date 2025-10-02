@@ -17,6 +17,7 @@
 import os
 import time
 import unittest
+import logging
 
 from pyspark.sql.utils import PythonException
 from pyspark.testing.sqlutils import (
@@ -26,6 +27,9 @@ from pyspark.testing.sqlutils import (
     pandas_requirement_message,
     pyarrow_requirement_message,
 )
+from pyspark.sql import Row
+from pyspark.testing.utils import assertDataFrameEqual
+from pyspark.util import is_remote_only
 
 if have_pyarrow:
     import pyarrow as pa
@@ -221,6 +225,45 @@ class MapInArrowTestsMixin(object):
             df = self.spark.range(1)
             df.mapInArrow(func, "a int").collect()
 
+    @unittest.skipIf(is_remote_only(), "Requires JVM access")
+    def test_map_in_arrow_with_logging(self):
+        import pyarrow as pa
+
+        def func_with_logging(iterator):
+            logger = logging.getLogger("test_arrow_map")
+            for batch in iterator:
+                assert isinstance(batch, pa.RecordBatch)
+                logger.warning(f"arrow map: {batch.to_pydict()}")
+                yield batch
+
+        with self.sql_conf(
+            {
+                "spark.sql.execution.arrow.maxRecordsPerBatch": "3",
+                "spark.sql.pyspark.worker.logging.enabled": "true",
+            }
+        ):
+            assertDataFrameEqual(
+                self.spark.range(9, numPartitions=2).mapInArrow(func_with_logging, "id long"),
+                [Row(id=i) for i in range(9)],
+            )
+
+        logs = self.spark.table("system.session.python_worker_logs")
+
+        assertDataFrameEqual(
+            logs.select("level", "msg", "logger"),
+            self._expected_logs_for_test_map_in_arrow_with_logging(),
+        )
+
+    def _expected_logs_for_test_map_in_arrow_with_logging(self):
+        return [
+            Row(
+                level="WARNING",
+                msg=f"arrow map: {dict(id=lst)}",
+                logger="test_arrow_map",
+            )
+            for lst in [[0, 1, 2], [3], [4, 5, 6], [7, 8]]
+        ]
+
 
 class MapInArrowTests(MapInArrowTestsMixin, ReusedSQLTestCase):
     @classmethod
@@ -252,6 +295,16 @@ class MapInArrowWithArrowBatchSlicingTestsAndReducedBatchSizeTests(MapInArrowTes
         # Set it to a small odd value to exercise batching logic for all test cases
         cls.spark.conf.set("spark.sql.execution.arrow.maxRecordsPerBatch", "3")
         cls.spark.conf.set("spark.sql.execution.arrow.maxBytesPerBatch", "10")
+
+    def _expected_logs_for_test_map_in_arrow_with_logging(self):
+        return [
+            Row(
+                level="WARNING",
+                msg=f"arrow map: {dict(id=[i])}",
+                logger="test_arrow_map",
+            )
+            for i in range(9)
+        ]
 
 
 class MapInArrowWithOutputArrowBatchSlicingRecordsTests(MapInArrowTests):
