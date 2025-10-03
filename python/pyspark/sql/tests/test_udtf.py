@@ -20,6 +20,7 @@ import platform
 import shutil
 import tempfile
 import unittest
+import logging
 import time
 from dataclasses import dataclass
 from typing import Iterator, Optional
@@ -71,6 +72,7 @@ from pyspark.testing.sqlutils import (
     pyarrow_requirement_message,
     ReusedSQLTestCase,
 )
+from pyspark.util import is_remote_only
 
 
 class BaseUDTFTestsMixin:
@@ -3043,6 +3045,37 @@ class BaseUDTFTestsMixin:
         ]
         for idx, field in enumerate(result_df.schema.fields):
             self.assertEqual(field.dataType, expected_output_types[idx])
+
+    @unittest.skipIf(is_remote_only(), "Requires JVM access")
+    def test_udtf_with_logging(self):
+        @udtf(returnType="a: int, b: int")
+        class TestUDTFWithLogging:
+            def eval(self, x: int):
+                logger = logging.getLogger("test_udtf")
+                logger.warning(f"udtf with logging: {x}")
+                yield x * 2, x + 10
+
+        with self.sql_conf({"spark.sql.pyspark.worker.logging.enabled": "true"}):
+            assertDataFrameEqual(
+                self.spark.createDataFrame([(5,), (10,)], ["x"]).lateralJoin(
+                    TestUDTFWithLogging(col("x").outer())
+                ),
+                [Row(x=x, a=x * 2, b=x + 10) for x in [5, 10]],
+            )
+
+        logs = self.spark.table("system.session.python_worker_logs")
+
+        assertDataFrameEqual(
+            logs.select("level", "msg", "logger"),
+            [
+                Row(
+                    level="WARNING",
+                    msg=f"udtf with logging: {x}",
+                    logger="test_udtf",
+                )
+                for x in [5, 10]
+            ],
+        )
 
 
 class UDTFTests(BaseUDTFTestsMixin, ReusedSQLTestCase):
