@@ -22,6 +22,7 @@ from typing import IO
 
 from pyspark.accumulators import _accumulatorRegistry
 from pyspark.errors import PySparkAssertionError
+from pyspark.logger.worker_io import capture_outputs
 from pyspark.serializers import (
     read_bool,
     read_int,
@@ -102,7 +103,8 @@ def main(infile: IO, outfile: IO) -> None:
         # Receive the `overwrite` flag.
         overwrite = read_bool(infile)
         # Create the data source writer instance.
-        writer = data_source.streamWriter(schema=schema, overwrite=overwrite)
+        with capture_outputs():
+            writer = data_source.streamWriter(schema=schema, overwrite=overwrite)
         # Receive the commit messages.
         num_messages = read_int(infile)
 
@@ -124,10 +126,11 @@ def main(infile: IO, outfile: IO) -> None:
 
         # Commit or abort the Python data source write.
         # Note the commit messages can be None if there are failed tasks.
-        if abort:
-            writer.abort(commit_messages, batch_id)
-        else:
-            writer.commit(commit_messages, batch_id)
+        with capture_outputs():
+            if abort:
+                writer.abort(commit_messages, batch_id)
+            else:
+                writer.commit(commit_messages, batch_id)
         # Send a status code back to JVM.
         write_int(0, outfile)
         outfile.flush()

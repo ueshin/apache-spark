@@ -25,6 +25,7 @@ from typing import IO, List, Iterator, Iterable, Tuple, Union
 
 from pyspark.accumulators import _accumulatorRegistry
 from pyspark.errors import PySparkAssertionError, PySparkRuntimeError
+from pyspark.logger.worker_io import capture_outputs
 from pyspark.serializers import (
     read_bool,
     read_int,
@@ -230,7 +231,8 @@ def write_read_func_and_partitions(
     if not is_streaming:
         # The partitioning of python batch source read is determined before query execution.
         try:
-            partitions = reader.partitions()  # type: ignore[call-arg]
+            with capture_outputs():
+                partitions = reader.partitions()  # type: ignore[call-arg]
             if not isinstance(partitions, list):
                 raise PySparkRuntimeError(
                     errorClass="DATA_SOURCE_TYPE_MISMATCH",
@@ -353,13 +355,19 @@ def main(infile: IO, outfile: IO) -> None:
 
         is_streaming = read_bool(infile)
 
+        print(
+            f"plan_data_source_read.py: {os.environ.get('SPARK_SESSION_UUID', None)}",
+            file=sys.stdout,
+        )
         # Instantiate data source reader.
         if is_streaming:
-            reader: Union[DataSourceReader, DataSourceStreamReader] = _streamReader(
-                data_source, schema
-            )
+            with capture_outputs():
+                reader: Union[DataSourceReader, DataSourceStreamReader] = _streamReader(
+                    data_source, schema
+                )
         else:
-            reader = data_source.reader(schema=schema)
+            with capture_outputs():
+                reader = data_source.reader(schema=schema)
             # Validate the reader.
             if not isinstance(reader, DataSourceReader):
                 raise PySparkAssertionError(

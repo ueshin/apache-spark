@@ -24,6 +24,7 @@ from typing import Dict, List, IO, Tuple
 
 from pyspark.accumulators import _accumulatorRegistry
 from pyspark.errors import PySparkRuntimeError, PySparkValueError
+from pyspark.logger.worker_io import capture_outputs
 from pyspark.serializers import (
     read_bool,
     read_int,
@@ -155,7 +156,8 @@ def main(infile: IO, outfile: IO) -> None:
             )
 
         # Invoke the UDTF's 'analyze' method.
-        result = handler.analyze(*args, **kwargs)  # type: ignore[attr-defined]
+        with capture_outputs():
+            result = handler.analyze(*args, **kwargs)  # type: ignore[attr-defined]
 
         # Check invariants about the 'analyze' method after running it.
         if not isinstance(result, AnalyzeResult):

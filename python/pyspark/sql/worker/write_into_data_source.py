@@ -23,6 +23,7 @@ from typing import IO, Iterable, Iterator
 from pyspark.accumulators import _accumulatorRegistry
 from pyspark.sql.conversion import ArrowTableToRowsConversion
 from pyspark.errors import PySparkAssertionError, PySparkRuntimeError, PySparkTypeError
+from pyspark.logger.worker_io import capture_outputs
 from pyspark.serializers import (
     read_bool,
     read_int,
@@ -123,11 +124,13 @@ def main(infile: IO, outfile: IO) -> None:
         provider = utf8_deserializer.loads(infile)
 
         # Check if the provider name matches the data source's name.
-        if provider.lower() != data_source_cls.name().lower():
+        with capture_outputs():
+            name = data_source_cls.name()
+        if provider.lower() != name.lower():
             raise PySparkAssertionError(
                 errorClass="DATA_SOURCE_TYPE_MISMATCH",
                 messageParameters={
-                    "expected": f"provider with name {data_source_cls.name()}",
+                    "expected": f"provider with name {name}",
                     "actual": f"'{provider}'",
                 },
             )
@@ -173,11 +176,13 @@ def main(infile: IO, outfile: IO) -> None:
         is_streaming = read_bool(infile)
 
         # Instantiate a data source.
-        data_source = data_source_cls(options=options)  # type: ignore
+        with capture_outputs():
+            data_source = data_source_cls(options=options)  # type: ignore
 
         if is_streaming:
             # Instantiate the streaming data source writer.
-            writer = data_source.streamWriter(schema, overwrite)
+            with capture_outputs():
+                writer = data_source.streamWriter(schema, overwrite)
             if not isinstance(writer, (DataSourceStreamWriter, DataSourceStreamArrowWriter)):
                 raise PySparkAssertionError(
                     errorClass="DATA_SOURCE_TYPE_MISMATCH",
@@ -191,7 +196,8 @@ def main(infile: IO, outfile: IO) -> None:
                 )
         else:
             # Instantiate the data source writer.
-            writer = data_source.writer(schema, overwrite)  # type: ignore[assignment]
+            with capture_outputs():
+                writer = data_source.writer(schema, overwrite)  # type: ignore[assignment]
             if not isinstance(writer, DataSourceWriter):
                 raise PySparkAssertionError(
                     errorClass="DATA_SOURCE_TYPE_MISMATCH",

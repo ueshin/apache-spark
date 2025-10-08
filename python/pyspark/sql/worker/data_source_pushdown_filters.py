@@ -27,6 +27,7 @@ from typing import IO, Type, Union
 from pyspark.accumulators import _accumulatorRegistry
 from pyspark.errors import PySparkAssertionError, PySparkValueError
 from pyspark.errors.exceptions.base import PySparkNotImplementedError
+from pyspark.logger.worker_io import capture_outputs
 from pyspark.serializers import SpecialLengths, UTF8Deserializer, read_int, write_int
 from pyspark.sql.datasource import (
     DataSource,
@@ -188,7 +189,8 @@ def main(infile: IO, outfile: IO) -> None:
             )
 
         # Get the reader.
-        reader = data_source.reader(schema=schema)
+        with capture_outputs():
+            reader = data_source.reader(schema=schema)
         # Validate the reader.
         if not isinstance(reader, DataSourceReader):
             raise PySparkAssertionError(
@@ -205,9 +207,10 @@ def main(infile: IO, outfile: IO) -> None:
         filters = [FilterRef(deserializeFilter(f)) for f in filter_dicts]
 
         # Push down the filters and get the indices of the unsupported filters.
-        unsupported_filters = set(
-            FilterRef(f) for f in reader.pushFilters([ref.filter for ref in filters])
-        )
+        with capture_outputs():
+            unsupported_filters = set(
+                FilterRef(f) for f in reader.pushFilters([ref.filter for ref in filters])
+            )
         supported_filter_indices = []
         for i, filter in enumerate(filters):
             if filter in unsupported_filters:
