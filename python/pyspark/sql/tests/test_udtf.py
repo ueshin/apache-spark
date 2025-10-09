@@ -3066,11 +3066,12 @@ class BaseUDTFTestsMixin:
         logs = self.spark.table("system.session.python_worker_logs")
 
         assertDataFrameEqual(
-            logs.select("level", "msg", "logger"),
+            logs.select("level", "msg", "context", "logger"),
             [
                 Row(
                     level="WARNING",
                     msg=f"udtf with logging: {x}",
+                    context={"class_name": "TestUDTFWithLogging", "func_name": "eval"},
                     logger="test_udtf",
                 )
                 for x in [5, 10]
@@ -3101,11 +3102,19 @@ class BaseUDTFTestsMixin:
         logs = self.spark.table("system.session.python_worker_logs")
 
         assertDataFrameEqual(
-            logs.select("level", "msg", "logger").distinct(),
+            logs.select(
+                "level",
+                "msg",
+                col("context.class_name").alias("context_class_name"),
+                col("context.func_name").alias("context_func_name"),
+                "logger",
+            ).distinct(),
             [
                 Row(
                     level="WARNING",
                     msg='udtf analyze: "long"',
+                    context_class_name="TestUDTFWithLogging",
+                    context_func_name="analyze",
                     logger="test_udtf",
                 )
             ],

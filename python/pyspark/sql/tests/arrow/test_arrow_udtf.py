@@ -1724,11 +1724,12 @@ class ArrowUDTFTestsMixin:
         logs = self.spark.table("system.session.python_worker_logs")
 
         assertDataFrameEqual(
-            logs.select("level", "msg", "logger"),
+            logs.select("level", "msg", "context", "logger"),
             [
                 Row(
                     level="WARNING",
                     msg=f"arrow udtf: {dict(id=lst)}",
+                    context={"class_name": "TestArrowUDTFWithLogging", "func_name": "eval"},
                     logger="test_arrow_udtf",
                 )
                 for lst in [[0, 1, 2], [3], [4, 5, 6], [7, 8]]

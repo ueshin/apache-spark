@@ -642,11 +642,12 @@ class WindowPandasUDFTestsMixin:
         logs = self.spark.table("system.session.python_worker_logs")
 
         assertDataFrameEqual(
-            logs.select("level", "msg", "logger"),
+            logs.select("level", "msg", "context", "logger"),
             [
                 Row(
                     level="WARNING",
                     msg=f"window pandas udf: {lst}",
+                    context={"func_name": my_window_pandas_udf.__name__},
                     logger="test_window_pandas",
                 )
                 for lst in [[1.0], [1.0, 2.0], [3.0], [3.0, 5.0], [3.0, 5.0, 10.0]]

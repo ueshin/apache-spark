@@ -411,11 +411,12 @@ class ApplyInArrowTestsMixin:
         logs = self.spark.table("system.session.python_worker_logs")
 
         assertDataFrameEqual(
-            logs.select("level", "msg", "logger"),
+            logs.select("level", "msg", "context", "logger"),
             [
                 Row(
                     level="WARNING",
                     msg=f"arrow grouped map: {dict(id=lst, value=[v*10 for v in lst])}",
+                    context={"func_name": func_with_logging.__name__},
                     logger="test_arrow_grouped_map",
                 )
                 for lst in [[0, 2, 4, 6, 8], [1, 3, 5, 7]]
@@ -450,11 +451,12 @@ class ApplyInArrowTestsMixin:
         logs = self.spark.table("system.session.python_worker_logs")
 
         assertDataFrameEqual(
-            logs.select("level", "msg", "logger"),
+            logs.select("level", "msg", "context", "logger"),
             [
                 Row(
                     level="WARNING",
                     msg=f"arrow grouped map: {dict(id=lst, value=[v*10 for v in lst])}",
+                    context={"func_name": func_with_logging.__name__},
                     logger="test_arrow_grouped_map",
                 )
                 for lst in [[0, 2, 4], [6, 8], [1, 3, 5], [7]]

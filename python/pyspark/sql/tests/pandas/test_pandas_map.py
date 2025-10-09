@@ -513,11 +513,12 @@ class MapInPandasTestsMixin:
         logs = self.spark.table("system.session.python_worker_logs")
 
         assertDataFrameEqual(
-            logs.select("level", "msg", "logger"),
+            logs.select("level", "msg", "context", "logger"),
             [
                 Row(
                     level="WARNING",
                     msg=f"pandas map: {lst}",
+                    context={"func_name": func_with_logging.__name__},
                     logger="test_pandas_map",
                 )
                 for lst in [[0, 1, 2], [3], [4, 5, 6], [7, 8]]

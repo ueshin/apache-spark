@@ -1197,11 +1197,12 @@ class ScalarArrowUDFTestsMixin:
         logs = self.spark.table("system.session.python_worker_logs")
 
         assertDataFrameEqual(
-            logs.select("level", "msg", "logger"),
+            logs.select("level", "msg", "context", "logger"),
             [
                 Row(
                     level="WARNING",
                     msg=f"scalar arrow udf: {lst}",
+                    context={"func_name": my_scalar_arrow_udf.__name__},
                     logger="test_scalar_arrow",
                 )
                 for lst in [[0], [1, 2]]
@@ -1236,11 +1237,12 @@ class ScalarArrowUDFTestsMixin:
         logs = self.spark.table("system.session.python_worker_logs")
 
         assertDataFrameEqual(
-            logs.select("level", "msg", "logger"),
+            logs.select("level", "msg", "context", "logger"),
             [
                 Row(
                     level="WARNING",
                     msg=f"scalar iter arrow udf: {lst}",
+                    context={"func_name": my_scalar_iter_arrow_udf.__name__},
                     logger="test_scalar_iter_arrow",
                 )
                 for lst in [[0, 1, 2], [3], [4, 5, 6], [7, 8]]

@@ -686,11 +686,12 @@ class CogroupedApplyInPandasTestsMixin:
         logs = self.spark.table("system.session.python_worker_logs")
 
         assertDataFrameEqual(
-            logs.select("level", "msg", "logger"),
+            logs.select("level", "msg", "context", "logger"),
             [
                 Row(
                     level="WARNING",
                     msg=f"pandas cogrouped map: {dict(v1=v1, v2=v2)}",
+                    context={"func_name": func_with_logging.__name__},
                     logger="test_pandas_cogrouped_map",
                 )
                 for v1, v2 in [([10, 30], [100, 300]), ([20], [200])]

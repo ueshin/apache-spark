@@ -250,15 +250,16 @@ class MapInArrowTestsMixin(object):
         logs = self.spark.table("system.session.python_worker_logs")
 
         assertDataFrameEqual(
-            logs.select("level", "msg", "logger"),
-            self._expected_logs_for_test_map_in_arrow_with_logging(),
+            logs.select("level", "msg", "context", "logger"),
+            self._expected_logs_for_test_map_in_arrow_with_logging(func_with_logging.__name__),
         )
 
-    def _expected_logs_for_test_map_in_arrow_with_logging(self):
+    def _expected_logs_for_test_map_in_arrow_with_logging(self, func_name):
         return [
             Row(
                 level="WARNING",
                 msg=f"arrow map: {dict(id=lst)}",
+                context={"func_name": func_name},
                 logger="test_arrow_map",
             )
             for lst in [[0, 1, 2], [3], [4, 5, 6], [7, 8]]
@@ -296,11 +297,12 @@ class MapInArrowWithArrowBatchSlicingTestsAndReducedBatchSizeTests(MapInArrowTes
         cls.spark.conf.set("spark.sql.execution.arrow.maxRecordsPerBatch", "3")
         cls.spark.conf.set("spark.sql.execution.arrow.maxBytesPerBatch", "10")
 
-    def _expected_logs_for_test_map_in_arrow_with_logging(self):
+    def _expected_logs_for_test_map_in_arrow_with_logging(self, func_name):
         return [
             Row(
                 level="WARNING",
                 msg=f"arrow map: {dict(id=[i])}",
+                context={"func_name": func_name},
                 logger="test_arrow_map",
             )
             for i in range(9)

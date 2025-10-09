@@ -24,7 +24,7 @@ from typing import Dict, List, IO, Tuple
 
 from pyspark.accumulators import _accumulatorRegistry
 from pyspark.errors import PySparkRuntimeError, PySparkValueError
-from pyspark.logger.worker_io import capture_outputs
+from pyspark.logger.worker_io import capture_outputs, context_provider as default_context_provider
 from pyspark.serializers import (
     read_bool,
     read_int,
@@ -155,8 +155,14 @@ def main(infile: IO, outfile: IO) -> None:
                 )
             )
 
+        def context_provider() -> dict[str, str]:
+            context = default_context_provider()
+            # The default context provider can't detect the class name from static methods.
+            context["class_name"] = handler.__name__
+            return context
+
         # Invoke the UDTF's 'analyze' method.
-        with capture_outputs():
+        with capture_outputs(context_provider):
             result = handler.analyze(*args, **kwargs)  # type: ignore[attr-defined]
 
         # Check invariants about the 'analyze' method after running it.
