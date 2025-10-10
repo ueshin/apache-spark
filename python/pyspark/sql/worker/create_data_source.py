@@ -140,24 +140,23 @@ def main(infile: IO, outfile: IO) -> None:
             value = utf8_deserializer.loads(infile)
             options[key] = value
 
-        # Instantiate a data source.
         with capture_outputs():
+            # Instantiate a data source.
             data_source = data_source_cls(options=options)  # type: ignore
 
-        # Get the schema of the data source.
-        # If user_specified_schema is not None, use user_specified_schema.
-        # Otherwise, use the schema of the data source.
-        # Throw exception if the data source does not implement schema().
-        is_ddl_string = False
-        if user_specified_schema is None:
-            with capture_outputs():
+            # Get the schema of the data source.
+            # If user_specified_schema is not None, use user_specified_schema.
+            # Otherwise, use the schema of the data source.
+            # Throw exception if the data source does not implement schema().
+            is_ddl_string = False
+            if user_specified_schema is None:
                 schema = data_source.schema()
-            if isinstance(schema, str):
-                # Here we cannot use _parse_datatype_string to parse the DDL string schema.
-                # as it requires an active Spark session.
-                is_ddl_string = True
-        else:
-            schema = user_specified_schema  # type: ignore
+                if isinstance(schema, str):
+                    # Here we cannot use _parse_datatype_string to parse the DDL string schema.
+                    # as it requires an active Spark session.
+                    is_ddl_string = True
+            else:
+                schema = user_specified_schema  # type: ignore
 
         assert schema is not None
 
