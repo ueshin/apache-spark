@@ -168,7 +168,7 @@ class ArrowStreamUDFSerializer(ArrowStreamSerializer):
                 assert isinstance(batch, pa.RecordBatch)
 
                 # Wrap the root struct
-                if len(batch.columns) == 0:
+                if batch.num_columns == 0:
                     # When batch has no column, it should still create
                     # an empty batch with the number of rows set.
                     struct = pa.array([{}] * batch.num_rows)
@@ -1143,7 +1143,8 @@ class GroupArrowUDFSerializer(ArrowStreamGroupUDFSerializer):
         return "GroupArrowUDFSerializer"
 
 
-class AggArrowUDFSerializer(ArrowStreamArrowUDFSerializer):
+# Serializer for SQL_GROUPED_AGG_ARROW_UDF and SQL_WINDOW_AGG_ARROW_UDF
+class ArrowStreamAggArrowUDFSerializer(ArrowStreamArrowUDFSerializer):
     def __init__(
         self,
         timezone,
@@ -1174,7 +1175,14 @@ class AggArrowUDFSerializer(ArrowStreamArrowUDFSerializer):
             dataframes_in_group = read_int(stream)
 
             if dataframes_in_group == 1:
-                yield pa.concat_batches(ArrowStreamSerializer.load_stream(self, stream))
+                batches = ArrowStreamSerializer.load_stream(self, stream)
+                if hasattr(pa, "concat_batches"):
+                    yield pa.concat_batches(batches)
+                else:
+                    # pyarrow.concat_batches not supported in old versions
+                    yield pa.RecordBatch.from_struct_array(
+                        pa.concat_arrays([b.to_struct_array() for b in batches])
+                    )
 
             elif dataframes_in_group != 0:
                 raise PySparkValueError(
@@ -1183,7 +1191,7 @@ class AggArrowUDFSerializer(ArrowStreamArrowUDFSerializer):
                 )
 
     def __repr__(self):
-        return "AggArrowUDFSerializer"
+        return "ArrowStreamAggArrowUDFSerializer"
 
 
 class GroupPandasUDFSerializer(ArrowStreamPandasUDFSerializer):
