@@ -119,6 +119,18 @@ private[spark] object BasePythonRunner extends Logging {
     new File(faultHandlerLogDir, pid.toString).toPath
   }
 
+  private[spark] def tryReadFaultHandlerLog(
+      faultHandlerEnabled: Boolean, pid: Option[Int]): Option[String] = {
+    if (faultHandlerEnabled) {
+      pid.map(faultHandlerLogPath).collect {
+        case path if JavaFiles.exists(path) =>
+          val error = String.join("\n", JavaFiles.readAllLines(path)) + "\n"
+          JavaFiles.deleteIfExists(path)
+          error
+      }
+    } else None
+  }
+
   private[spark] def pythonWorkerStatusMessageWithContext(
       handle: Option[ProcessHandle],
       worker: PythonWorker,
@@ -318,8 +330,7 @@ private[spark] abstract class BasePythonRunner[IN, OUT](
 
     // Return an iterator that read lines from the process's stdout
     val dataIn = new DataInputStream(new BufferedInputStream(
-      new ReaderInputStream(worker, writer, handle, idleTimeoutSeconds, killOnIdleTimeout),
-      bufferSize))
+      new ReaderInputStream(worker, writer, handle), bufferSize))
     val stdoutIterator = newReaderIterator(
       dataIn, writer, startTime, env, worker, handle.map(_.pid.toInt), releasedOrClosed, context)
     new InterruptibleIterator(context, stdoutIterator)
@@ -648,13 +659,6 @@ private[spark] abstract class BasePythonRunner[IN, OUT](
         logError("This may have been caused by a prior exception:", writer.exception.get)
         throw writer.exception.get
 
-      case e: IOException if faultHandlerEnabled && pid.isDefined &&
-          JavaFiles.exists(faultHandlerLogPath(pid.get)) =>
-        val path = faultHandlerLogPath(pid.get)
-        val error = String.join("\n", JavaFiles.readAllLines(path)) + "\n"
-        JavaFiles.deleteIfExists(path)
-        throw new SparkException(s"Python worker exited unexpectedly (crashed): $error", e)
-
       case e: IOException if !faultHandlerEnabled =>
         throw new SparkException(
           s"Python worker exited unexpectedly (crashed). " +
@@ -663,7 +667,11 @@ private[spark] abstract class BasePythonRunner[IN, OUT](
             "the better Python traceback.", e)
 
       case e: IOException =>
-        throw new SparkException("Python worker exited unexpectedly (crashed)", e)
+        val base = "Python worker exited unexpectedly (crashed)"
+        val msg = tryReadFaultHandlerLog(faultHandlerEnabled, pid)
+          .map(error => s"$base: $error")
+          .getOrElse(base)
+        throw new SparkException(msg, e)
     }
   }
 
@@ -720,9 +728,7 @@ private[spark] abstract class BasePythonRunner[IN, OUT](
   class ReaderInputStream(
       worker: PythonWorker,
       writer: Writer,
-      handle: Option[ProcessHandle],
-      idleTimeoutSeconds: Long,
-      killOnIdleTimeout: Boolean) extends InputStream {
+      handle: Option[ProcessHandle]) extends InputStream {
     private[this] var writerIfbhThreadLocalValue: Object = null
     private[this] val temp = new Array[Byte](1)
     private[this] val bufferStream = new DirectByteBufferOutputStream()
@@ -856,6 +862,14 @@ private[spark] abstract class BasePythonRunner[IN, OUT](
             }
           }
         }
+      }
+      if (pythonWorkerKilled && n == -1) {
+        val base = "Python worker process terminated due to idle timeout " +
+          s"(timeout: $idleTimeoutSeconds seconds)"
+        val msg = tryReadFaultHandlerLog(faultHandlerEnabled, handle.map(_.pid.toInt))
+          .map(error => s"$base: $error")
+          .getOrElse(base)
+        throw new SparkException(msg)
       }
       n
     }

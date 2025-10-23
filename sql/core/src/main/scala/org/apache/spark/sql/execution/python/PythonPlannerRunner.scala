@@ -136,13 +136,6 @@ abstract class PythonPlannerRunner[T](func: PythonFunction) extends Logging {
 
       res
     } catch {
-      case e: IOException if faultHandlerEnabled && pid.isDefined &&
-        JavaFiles.exists(faultHandlerLogPath(pid.get)) =>
-        val path = faultHandlerLogPath(pid.get)
-        val error = String.join("\n", JavaFiles.readAllLines(path)) + "\n"
-        JavaFiles.deleteIfExists(path)
-        throw new SparkException(s"Python worker exited unexpectedly (crashed): $error", e)
-
       case e: IOException if !faultHandlerEnabled =>
         throw new SparkException(
           s"Python worker exited unexpectedly (crashed). " +
@@ -151,7 +144,11 @@ abstract class PythonPlannerRunner[T](func: PythonFunction) extends Logging {
             "the better Python traceback.", e)
 
       case e: IOException =>
-        throw new SparkException("Python worker exited unexpectedly (crashed)", e)
+        val base = "Python worker exited unexpectedly (crashed)"
+        val msg = tryReadFaultHandlerLog(faultHandlerEnabled, pid)
+          .map(error => s"$base: $error")
+          .getOrElse(base)
+        throw new SparkException(msg, e)
     } finally {
       try {
         bufferStream.close()
