@@ -35,7 +35,7 @@ import org.apache.spark.sql.catalyst.encoders.ExpressionEncoder
 import org.apache.spark.sql.catalyst.expressions.UnsafeRow
 import org.apache.spark.sql.catalyst.types.DataTypeUtils
 import org.apache.spark.sql.execution.metric.SQLMetric
-import org.apache.spark.sql.execution.python.{PythonArrowInput, PythonArrowOutput, PythonUDFRunner}
+import org.apache.spark.sql.execution.python.{PythonArrowInput, PythonArrowOutput, PythonArrowStreamInput, PythonUDFRunner}
 import org.apache.spark.sql.execution.python.streaming.ApplyInPandasWithStatePythonRunner.{COUNT_COLUMN_SCHEMA_FROM_PYTHON_WORKER, InType, OutType, OutTypeForState, STATE_METADATA_SCHEMA_FROM_PYTHON_WORKER}
 import org.apache.spark.sql.execution.python.streaming.ApplyInPandasWithStateWriter.STATE_METADATA_SCHEMA
 import org.apache.spark.sql.execution.streaming.operators.stateful.flatmapgroupswithstate.GroupStateImpl
@@ -68,6 +68,7 @@ class ApplyInPandasWithStatePythonRunner(
   extends BasePythonRunner[InType, OutType](
     funcs.map(_._1), evalType, argOffsets, jobArtifactUUID, pythonMetrics)
   with PythonArrowInput[InType]
+  with PythonArrowStreamInput[InType]
   with PythonArrowOutput[OutType] {
 
   override val pythonExec: String =
@@ -169,7 +170,7 @@ class ApplyInPandasWithStatePythonRunner(
       true
     } else {
       pandasWriter.finalizeData()
-      super[PythonArrowInput].close()
+      super[PythonArrowStreamInput].close()
       false
     }
   }

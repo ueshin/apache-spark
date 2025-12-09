@@ -170,9 +170,11 @@ object ArrowPythonRunner {
     val binaryAsBytes = Seq(
       SQLConf.PYSPARK_BINARY_AS_BYTES.key ->
       conf.pysparkBinaryAsBytes.toString)
+    val arrowFlightEnabled = Seq(
+      SQLConf.PYTHON_UDF_ARROW_FLIGHT_ENABLED.key -> conf.pythonUDFArrowFlightEnabled.toString)
     Map(timeZoneConf ++ pandasColsByName ++ arrowSafeTypeCheck ++
       arrowAyncParallelism ++ useLargeVarTypes ++
-      intToDecimalCoercion ++ binaryAsBytes ++
+      intToDecimalCoercion ++ binaryAsBytes ++ arrowFlightEnabled ++
       legacyPandasConversion ++ legacyPandasConversionUDF: _*)
   }
 }

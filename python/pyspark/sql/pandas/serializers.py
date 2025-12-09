@@ -20,12 +20,15 @@ Serializers for PyArrow and pandas conversions. See `pyspark.serializers` for mo
 """
 
 from itertools import groupby
+import queue
+import time
 from typing import TYPE_CHECKING, Iterator, Optional
 
 import pyspark
 from pyspark.errors import PySparkRuntimeError, PySparkTypeError, PySparkValueError
 from pyspark.serializers import (
     Serializer,
+    read_bool,
     read_int,
     write_int,
     UTF8Deserializer,
@@ -107,11 +110,7 @@ class ArrowCollectSerializer(Serializer):
         return "ArrowCollectSerializer(%s)" % self.serializer
 
 
-class ArrowStreamSerializer(Serializer):
-    """
-    Serializes Arrow record batches as a stream.
-    """
-
+class ArrowStreamDumper(Serializer):
     def dump_stream(self, iterator, stream):
         import pyarrow as pa
 
@@ -125,12 +124,58 @@ class ArrowStreamSerializer(Serializer):
             if writer is not None:
                 writer.close()
 
+
+class ArrowStreamLoader(Serializer):
     def load_stream(self, stream):
         import pyarrow as pa
 
         reader = pa.ipc.open_stream(stream)
         for batch in reader:
             yield batch
+
+
+class ArrowFlightLoader(Serializer):
+    def __init__(self, port, **kwargs):
+        super().__init__()
+
+        import pyarrow.flight as flight
+
+        class FlightReader(flight.FlightServerBase):
+            def __init__(self, *args, **kwargs):
+                super().__init__(*args, **kwargs)
+                self._batches = queue.Queue()
+                self._reading = True
+
+            def do_put(
+                self,
+                context: flight.ServerCallContext,
+                descriptor: flight.FlightDescriptor,
+                reader: flight.MetadataRecordBatchReader,
+                writer: flight.FlightMetadataWriter,
+            ):
+                for batch in reader:
+                    self._batches.put(batch.data)
+                self._reading = False
+
+        self._flight_reader = FlightReader(flight.Location.for_grpc_tcp("localhost", port))
+
+    def load_stream(self, stream):
+        try:
+            has_batches = read_bool(stream)
+            if has_batches:
+                while self._flight_reader._reading or self._flight_reader._batches:
+                    try:
+                        yield self._flight_reader._batches.get(timeout=1)
+                    except queue.Empty:
+                        time.sleep(0.01)
+        finally:
+            self._flight_reader.shutdown()
+
+
+class ArrowStreamSerializer(ArrowStreamDumper, ArrowStreamLoader):
+    """
+    Serializes Arrow record batches as a stream.
+    """
 
     def __repr__(self):
         return "ArrowStreamSerializer"
@@ -718,7 +763,7 @@ class ArrowStreamPandasUDFSerializer(ArrowStreamPandasSerializer):
         return "ArrowStreamPandasUDFSerializer"
 
 
-class ArrowStreamArrowUDFSerializer(ArrowStreamSerializer):
+class ArrowStreamArrowUDFDumper(ArrowStreamDumper):
     """
     Serializer used by Python worker to evaluate Arrow UDFs
     """
@@ -729,8 +774,9 @@ class ArrowStreamArrowUDFSerializer(ArrowStreamSerializer):
         safecheck,
         assign_cols_by_name,
         arrow_cast,
+        **kwargs,
     ):
-        super().__init__()
+        super().__init__(**kwargs)
         self._timezone = timezone
         self._safecheck = safecheck
         self._assign_cols_by_name = assign_cols_by_name
@@ -780,8 +826,15 @@ class ArrowStreamArrowUDFSerializer(ArrowStreamSerializer):
 
         return ArrowStreamSerializer.dump_stream(self, wrap_and_init_stream(), stream)
 
+
+class ArrowStreamArrowUDFSerializer(ArrowStreamArrowUDFDumper, ArrowStreamLoader):
     def __repr__(self):
         return "ArrowStreamArrowUDFSerializer"
+
+
+class ArrowFlightArrowUDFSerializer(ArrowStreamArrowUDFDumper, ArrowFlightLoader):
+    def __repr__(self):
+        return "ArrowFlightArrowUDFSerializer"
 
 
 class ArrowBatchUDFSerializer(ArrowStreamArrowUDFSerializer):

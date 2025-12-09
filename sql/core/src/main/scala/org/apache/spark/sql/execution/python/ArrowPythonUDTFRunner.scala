@@ -46,6 +46,7 @@ class ArrowPythonUDTFRunner(
   extends BasePythonRunner[Iterator[InternalRow], ColumnarBatch](
       Seq(ChainedPythonFunctions(Seq(udtf.func))), evalType, Array(argMetas.map(_.offset)),
       jobArtifactUUID, pythonMetrics)
+  with PythonArrowInput[Iterator[InternalRow]]
   with BatchedPythonArrowInput
   with BasicPythonArrowOutput {
 

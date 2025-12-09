@@ -63,6 +63,7 @@ from pyspark.sql.pandas.serializers import (
     TransformWithStateInPandasInitStateSerializer,
     TransformWithStateInPySparkRowSerializer,
     TransformWithStateInPySparkRowInitStateSerializer,
+    ArrowFlightArrowUDFSerializer,
     ArrowStreamArrowUDFSerializer,
     ArrowStreamAggPandasUDFSerializer,
     ArrowStreamAggArrowUDFSerializer,
@@ -196,6 +197,10 @@ class RunnerConf:
     @property
     def arrow_concurrency_level(self) -> int:
         return int(self.get("spark.sql.execution.pythonUDF.arrow.concurrency.level", -1))
+
+    @property
+    def arrow_flight_enabled(self) -> bool:
+        return self.get("spark.sql.execution.pythonUDF.arrow.flight.enabled", "false") == "true"
 
 
 def report_times(outfile, boot, init, finish):
@@ -2817,6 +2822,11 @@ def read_udfs(pickleSer, infile, eval_type, runner_conf):
             )
         elif eval_type == PythonEvalType.SQL_MAP_ARROW_ITER_UDF:
             ser = ArrowStreamUDFSerializer()
+        elif eval_type == PythonEvalType.SQL_SCALAR_ARROW_UDF and runner_conf.arrow_flight_enabled:
+            port = read_int(infile)
+            ser = ArrowFlightArrowUDFSerializer(
+                runner_conf.timezone, True, runner_conf.assign_cols_by_name, True, port=port
+            )
         elif eval_type in (
             PythonEvalType.SQL_SCALAR_ARROW_UDF,
             PythonEvalType.SQL_SCALAR_ARROW_ITER_UDF,

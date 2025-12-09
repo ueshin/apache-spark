@@ -17,9 +17,14 @@
 package org.apache.spark.sql.execution.python
 
 import java.io.DataOutputStream
+import java.net.ServerSocket
 import java.nio.channels.Channels
 
+import scala.collection.concurrent
+import scala.util.Random
+
 import org.apache.arrow.compression.{Lz4CompressionCodec, ZstdCompressionCodec}
+import org.apache.arrow.flight._
 import org.apache.arrow.vector.{VectorSchemaRoot, VectorUnloader}
 import org.apache.arrow.vector.compression.{CompressionCodec, NoCompressionCodec}
 import org.apache.arrow.vector.ipc.ArrowStreamWriter
@@ -32,6 +37,7 @@ import org.apache.spark.sql.catalyst.InternalRow
 import org.apache.spark.sql.execution.arrow
 import org.apache.spark.sql.execution.arrow.{ArrowWriter, ArrowWriterWrapper}
 import org.apache.spark.sql.execution.metric.SQLMetric
+import org.apache.spark.sql.execution.python.PythonArrowFlightInput.releasePort
 import org.apache.spark.sql.internal.SQLConf
 import org.apache.spark.sql.types.StructType
 import org.apache.spark.sql.util.ArrowUtils
@@ -41,7 +47,8 @@ import org.apache.spark.util.Utils
  * A trait that can be mixed-in with [[BasePythonRunner]]. It implements the logic from
  * JVM (an iterator of internal rows + additional data if required) to Python (Arrow).
  */
-private[python] trait PythonArrowInput[IN] { self: BasePythonRunner[IN, _] =>
+private[python] trait PythonArrowInput[IN] {
+  self: BasePythonRunner[IN, _] =>
   protected val schema: StructType
 
   protected val timeZoneId: String
@@ -51,12 +58,6 @@ private[python] trait PythonArrowInput[IN] { self: BasePythonRunner[IN, _] =>
   protected val largeVarTypes: Boolean
 
   protected def pythonMetrics: Map[String, SQLMetric]
-
-  protected def writeNextBatchToArrowStream(
-      root: VectorSchemaRoot,
-      writer: ArrowStreamWriter,
-      dataOut: DataOutputStream,
-      inputIterator: Iterator[IN]): Boolean
 
   protected def writeUDF(dataOut: DataOutputStream): Unit
 
@@ -69,8 +70,8 @@ private[python] trait PythonArrowInput[IN] { self: BasePythonRunner[IN, _] =>
   protected val root = VectorSchemaRoot.create(arrowSchema, allocator)
 
   // Create compression codec based on config
-  private val compressionCodecName = SQLConf.get.arrowCompressionCodec
-  private val codec = compressionCodecName match {
+  protected val compressionCodecName = SQLConf.get.arrowCompressionCodec
+  protected val codec = compressionCodecName match {
     case "none" => NoCompressionCodec.INSTANCE
     case "zstd" =>
       val compressionLevel = SQLConf.get.arrowZstdCompressionLevel
@@ -85,9 +86,19 @@ private[python] trait PythonArrowInput[IN] { self: BasePythonRunner[IN, _] =>
       throw SparkException.internalError(
         s"Unsupported Arrow compression codec: $other. Supported values: none, zstd, lz4")
   }
+}
+
+private[python] trait PythonArrowStreamInput[IN] {
+  self: BasePythonRunner[IN, _] with PythonArrowInput[IN] =>
   protected val unloader = new VectorUnloader(root, true, codec, true)
 
   protected var writer: ArrowStreamWriter = _
+
+  protected def writeNextBatchToArrowStream(
+      root: VectorSchemaRoot,
+      writer: ArrowStreamWriter,
+      dataOut: DataOutputStream,
+      inputIterator: Iterator[IN]): Boolean
 
   protected def close(): Unit = {
     Utils.tryWithSafeFinally {
@@ -128,8 +139,9 @@ private[python] trait PythonArrowInput[IN] { self: BasePythonRunner[IN, _] =>
   }
 }
 
-private[python] trait BasicPythonArrowInput extends PythonArrowInput[Iterator[InternalRow]] {
-  self: BasePythonRunner[Iterator[InternalRow], _] =>
+private[python] trait BasicPythonArrowInput
+  extends PythonArrowStreamInput[Iterator[InternalRow]] {
+  self: BasePythonRunner[Iterator[InternalRow], _] with PythonArrowInput[Iterator[InternalRow]] =>
   protected val arrowWriter: arrow.ArrowWriter = ArrowWriter.create(root)
 
   protected val maxRecordsPerBatch: Int = {
@@ -167,7 +179,7 @@ private[python] trait BasicPythonArrowInput extends PythonArrowInput[Iterator[In
       pythonMetrics("pythonDataSent") += deltaData
       true
     } else {
-      super[PythonArrowInput].close()
+      super[PythonArrowStreamInput].close()
       false
     }
   }
@@ -175,7 +187,7 @@ private[python] trait BasicPythonArrowInput extends PythonArrowInput[Iterator[In
 
 
 private[python] trait BatchedPythonArrowInput extends BasicPythonArrowInput {
-  self: BasePythonRunner[Iterator[InternalRow], _] =>
+  self: BasePythonRunner[Iterator[InternalRow], _] with PythonArrowInput[Iterator[InternalRow]] =>
   // Marker inside the input iterator to indicate the start of the next batch.
   private var nextBatchStart: Iterator[InternalRow] = Iterator.empty
 
@@ -330,6 +342,101 @@ private[python] trait GroupedPythonArrowInput { self: RowInputArrowPythonRunner 
           true
         } else {
           dataOut.writeInt(0) // End of data is marked by sending 0.
+          false
+        }
+      }
+    }
+  }
+}
+
+object PythonArrowFlightInput {
+  private val runningPorts: concurrent.Map[Int, Int] = concurrent.TrieMap.empty
+
+  private def available(port: Int): Boolean = {
+    var s: ServerSocket = null
+    try {
+      s = new ServerSocket(port)
+      true
+    } catch {
+      case _: Exception =>
+        false
+    } finally {
+      if (s != null) s.close()
+    }
+  }
+
+  @scala.annotation.tailrec
+  def getAvailablePort(): Int = {
+    val port = Random.between(32768, 65535)
+    synchronized {
+      if (available(port) && !runningPorts.contains(port)) {
+        runningPorts.put(port, port)
+        return port
+      }
+    }
+    getAvailablePort()
+  }
+
+  def releasePort(port: Int): Unit = {
+    runningPorts.remove(port)
+  }
+}
+
+private[python] trait PythonArrowFlightInput {
+  self: BasePythonRunner[Iterator[InternalRow], _] with PythonArrowInput[Iterator[InternalRow]] =>
+  protected val arrowWriter: arrow.ArrowWriter
+
+  protected override def newWriter(
+      env: SparkEnv,
+      worker: PythonWorker,
+      inputIterator: Iterator[Iterator[InternalRow]],
+      partitionIndex: Int,
+      context: TaskContext): Writer = {
+    new Writer(env, worker, inputIterator, partitionIndex, context) {
+
+      private val port = PythonArrowFlightInput.getAvailablePort()
+      private val location = Location.forGrpcInsecure("localhost", port)
+      private var flightClient: FlightClient = _
+      private var writer: FlightClient.ClientStreamListener = _
+
+      protected override def writeCommand(dataOut: DataOutputStream): Unit = {
+        dataOut.writeInt(port)
+        handleMetadataBeforeExec(dataOut)
+        writeUDF(dataOut)
+      }
+
+      override def writeNextInputToStream(dataOut: DataOutputStream): Boolean = {
+        if (flightClient == null) {
+          if (inputIterator.hasNext) {
+            Thread.sleep(100)
+            flightClient = FlightClient.builder(allocator, location).build()
+            val descriptor = FlightDescriptor.path(s"batch_${System.nanoTime()}")
+            writer = flightClient.startPut(descriptor, root, new SyncPutListener())
+            dataOut.writeBoolean(true)
+          } else {
+            dataOut.writeBoolean(false)
+          }
+        }
+
+        if (inputIterator.hasNext) {
+          val nextBatch = inputIterator.next()
+
+          while (nextBatch.hasNext) {
+            arrowWriter.write(nextBatch.next())
+          }
+          arrowWriter.finish()
+          writer.putNext()
+
+          arrowWriter.reset()
+          true
+        } else {
+          writer.completed()
+          writer.getResult()
+          if (flightClient != null) {
+            flightClient.close()
+            flightClient = null
+          }
+          releasePort(port)
           false
         }
       }
