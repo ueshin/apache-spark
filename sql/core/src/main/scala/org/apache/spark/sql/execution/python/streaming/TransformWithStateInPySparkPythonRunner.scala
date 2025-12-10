@@ -33,7 +33,7 @@ import org.apache.spark.internal.Logging
 import org.apache.spark.internal.config.Python.{PYTHON_UNIX_DOMAIN_SOCKET_DIR, PYTHON_UNIX_DOMAIN_SOCKET_ENABLED}
 import org.apache.spark.sql.catalyst.InternalRow
 import org.apache.spark.sql.execution.metric.SQLMetric
-import org.apache.spark.sql.execution.python.{BasicPythonArrowOutput, PythonArrowInput, PythonUDFRunner}
+import org.apache.spark.sql.execution.python.{BasicPythonArrowOutput, PythonArrowInput, PythonArrowStreamInput, PythonUDFRunner}
 import org.apache.spark.sql.execution.python.streaming.TransformWithStateInPySparkPythonRunner.{GroupedInType, InType}
 import org.apache.spark.sql.execution.streaming.operators.stateful.transformwithstate.statefulprocessor.{DriverStatefulProcessorHandleImpl, StatefulProcessorHandleImpl}
 import org.apache.spark.sql.internal.SQLConf
@@ -62,7 +62,8 @@ class TransformWithStateInPySparkPythonRunner(
     funcs, evalType, argOffsets, _schema, processorHandle, _timeZoneId,
     initialRunnerConf, pythonMetrics, jobArtifactUUID, groupingKeySchema,
     batchTimestampMs, eventTimeWatermarkForEviction)
-  with PythonArrowInput[InType] {
+  with PythonArrowInput[InType]
+  with PythonArrowStreamInput[InType] {
 
   private var pandasWriter: BaseStreamingArrowWriter = _
 
@@ -105,7 +106,7 @@ class TransformWithStateInPySparkPythonRunner(
       true
     } else {
       pandasWriter.finalizeCurrentArrowBatch()
-      super[PythonArrowInput].close()
+      super[PythonArrowStreamInput].close()
       false
     }
     val deltaData = dataOut.size() - startData
@@ -136,7 +137,8 @@ class TransformWithStateInPySparkPythonInitialStateRunner(
     funcs, evalType, argOffsets, dataSchema, processorHandle, _timeZoneId,
     initialRunnerConf, pythonMetrics, jobArtifactUUID, groupingKeySchema,
     batchTimestampMs, eventTimeWatermarkForEviction)
-  with PythonArrowInput[GroupedInType] {
+  with PythonArrowInput[GroupedInType]
+  with PythonArrowStreamInput[GroupedInType] {
 
   override protected lazy val schema: StructType = new StructType()
     .add("inputData", dataSchema)
@@ -201,7 +203,7 @@ class TransformWithStateInPySparkPythonInitialStateRunner(
       if (pandasWriter.getTotalNumRowsForBatch > 0) {
         pandasWriter.finalizeCurrentArrowBatch()
       }
-      super[PythonArrowInput].close()
+      super[PythonArrowStreamInput].close()
       false
     }
 

@@ -18,8 +18,10 @@ package org.apache.spark.sql.execution.python
 
 import java.io.DataOutputStream
 import java.nio.channels.Channels
+import java.util.{ArrayDeque, Queue}
 
 import org.apache.arrow.compression.{Lz4CompressionCodec, ZstdCompressionCodec}
+import org.apache.arrow.flight._
 import org.apache.arrow.vector.{VectorSchemaRoot, VectorUnloader}
 import org.apache.arrow.vector.compression.{CompressionCodec, NoCompressionCodec}
 import org.apache.arrow.vector.ipc.ArrowStreamWriter
@@ -41,7 +43,8 @@ import org.apache.spark.util.Utils
  * A trait that can be mixed-in with [[BasePythonRunner]]. It implements the logic from
  * JVM (an iterator of internal rows + additional data if required) to Python (Arrow).
  */
-private[python] trait PythonArrowInput[IN] { self: BasePythonRunner[IN, _] =>
+private[python] trait PythonArrowInput[IN] {
+  self: BasePythonRunner[IN, _] =>
   protected val schema: StructType
 
   protected val timeZoneId: String
@@ -51,12 +54,6 @@ private[python] trait PythonArrowInput[IN] { self: BasePythonRunner[IN, _] =>
   protected val largeVarTypes: Boolean
 
   protected def pythonMetrics: Map[String, SQLMetric]
-
-  protected def writeNextBatchToArrowStream(
-      root: VectorSchemaRoot,
-      writer: ArrowStreamWriter,
-      dataOut: DataOutputStream,
-      inputIterator: Iterator[IN]): Boolean
 
   protected def writeUDF(dataOut: DataOutputStream): Unit
 
@@ -69,8 +66,8 @@ private[python] trait PythonArrowInput[IN] { self: BasePythonRunner[IN, _] =>
   protected val root = VectorSchemaRoot.create(arrowSchema, allocator)
 
   // Create compression codec based on config
-  private val compressionCodecName = SQLConf.get.arrowCompressionCodec
-  private val codec = compressionCodecName match {
+  protected val compressionCodecName = SQLConf.get.arrowCompressionCodec
+  protected val codec = compressionCodecName match {
     case "none" => NoCompressionCodec.INSTANCE
     case "zstd" =>
       val compressionLevel = SQLConf.get.arrowZstdCompressionLevel
@@ -85,9 +82,19 @@ private[python] trait PythonArrowInput[IN] { self: BasePythonRunner[IN, _] =>
       throw SparkException.internalError(
         s"Unsupported Arrow compression codec: $other. Supported values: none, zstd, lz4")
   }
+}
+
+private[python] trait PythonArrowStreamInput[IN] {
+  self: BasePythonRunner[IN, _] with PythonArrowInput[IN] =>
   protected val unloader = new VectorUnloader(root, true, codec, true)
 
   protected var writer: ArrowStreamWriter = _
+
+  protected def writeNextBatchToArrowStream(
+      root: VectorSchemaRoot,
+      writer: ArrowStreamWriter,
+      dataOut: DataOutputStream,
+      inputIterator: Iterator[IN]): Boolean
 
   protected def close(): Unit = {
     Utils.tryWithSafeFinally {
@@ -128,8 +135,9 @@ private[python] trait PythonArrowInput[IN] { self: BasePythonRunner[IN, _] =>
   }
 }
 
-private[python] trait BasicPythonArrowInput extends PythonArrowInput[Iterator[InternalRow]] {
-  self: BasePythonRunner[Iterator[InternalRow], _] =>
+private[python] trait BasicPythonArrowInput
+  extends PythonArrowStreamInput[Iterator[InternalRow]] {
+  self: BasePythonRunner[Iterator[InternalRow], _] with PythonArrowInput[Iterator[InternalRow]] =>
   protected val arrowWriter: arrow.ArrowWriter = ArrowWriter.create(root)
 
   protected val maxRecordsPerBatch: Int = {
@@ -167,7 +175,7 @@ private[python] trait BasicPythonArrowInput extends PythonArrowInput[Iterator[In
       pythonMetrics("pythonDataSent") += deltaData
       true
     } else {
-      super[PythonArrowInput].close()
+      super[PythonArrowStreamInput].close()
       false
     }
   }
@@ -175,7 +183,7 @@ private[python] trait BasicPythonArrowInput extends PythonArrowInput[Iterator[In
 
 
 private[python] trait BatchedPythonArrowInput extends BasicPythonArrowInput {
-  self: BasePythonRunner[Iterator[InternalRow], _] =>
+  self: BasePythonRunner[Iterator[InternalRow], _] with PythonArrowInput[Iterator[InternalRow]] =>
   // Marker inside the input iterator to indicate the start of the next batch.
   private var nextBatchStart: Iterator[InternalRow] = Iterator.empty
 
@@ -331,6 +339,85 @@ private[python] trait GroupedPythonArrowInput { self: RowInputArrowPythonRunner 
         } else {
           dataOut.writeInt(0) // End of data is marked by sending 0.
           false
+        }
+      }
+    }
+  }
+}
+
+private[python] trait PythonArrowFlightInput {
+  self: BasePythonRunner[Iterator[InternalRow], _] with PythonArrowInput[Iterator[InternalRow]] =>
+  protected val arrowWriter: arrow.ArrowWriter
+
+  protected override def newWriter(
+      env: SparkEnv,
+      worker: PythonWorker,
+      inputIterator: Iterator[Iterator[InternalRow]],
+      partitionIndex: Int,
+      context: TaskContext): Writer = {
+    new Writer(env, worker, inputIterator, partitionIndex, context) {
+
+      private val queue: Queue[Boolean] = new ArrayDeque[Boolean](2)
+      private val lock = new Object()
+
+      private val flightServer: FlightServer = {
+        val producer: FlightProducer = new NoOpFlightProducer {
+
+          override def getStream(
+              context: FlightProducer.CallContext,
+              ticket: Ticket,
+              listener: FlightProducer.ServerStreamListener): Unit = {
+            listener.start(root)
+
+            var hasNext = true
+            while (hasNext) {
+              hasNext = lock.synchronized {
+                while (queue.isEmpty) lock.wait()
+                queue.peek()
+              }
+              if (hasNext) {
+                listener.putNext()
+                arrowWriter.reset()
+              } else {
+                listener.completed()
+              }
+              lock.synchronized(queue.remove())
+            }
+          }
+        }
+        val location = Location.forGrpcInsecure("localhost", 0)
+        val flightServer = FlightServer.builder(allocator, location, producer).build()
+        flightServer.start()
+        flightServer
+      }
+
+      context.addTaskCompletionListener[Unit] { _ =>
+        if (flightServer != null) {
+          flightServer.shutdown()
+        }
+      }
+
+      protected override def writeCommand(dataOut: DataOutputStream): Unit = {
+        dataOut.writeInt(flightServer.getPort)
+        handleMetadataBeforeExec(dataOut)
+        writeUDF(dataOut)
+      }
+
+      override def writeNextInputToStream(dataOut: DataOutputStream): Boolean = {
+        if (lock.synchronized(!queue.isEmpty)) {
+          true
+        } else {
+          val hasNext = inputIterator.hasNext
+          if (hasNext) {
+            val batch = inputIterator.next()
+            batch.foreach(arrowWriter.write)
+            arrowWriter.finish()
+          }
+          lock.synchronized {
+            queue.add(hasNext)
+            lock.notifyAll()
+          }
+          hasNext
         }
       }
     }

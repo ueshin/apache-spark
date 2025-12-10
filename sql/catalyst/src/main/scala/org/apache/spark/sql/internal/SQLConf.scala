@@ -4376,6 +4376,14 @@ object SQLConf {
       .booleanConf
       .createWithDefault(true)
 
+  val PYTHON_UDF_ARROW_FLIGHT_ENABLED =
+    buildConf("spark.sql.execution.pythonUDF.arrow.flight.enabled")
+      .doc("When true, use Arrow Flight for data transfer in Arrow UDFs. " +
+        "This can provide better performance for large data transfers.")
+      .version("4.2.0")
+      .booleanConf
+      .createWithDefault(false)
+
   val PYSPARK_WORKER_PYTHON_EXECUTABLE =
     buildConf("spark.sql.execution.pyspark.python")
       .internal()
@@ -7644,6 +7652,8 @@ class SQLConf extends Serializable with Logging with SqlApiConf {
     getConf(SQLConf.PANDAS_GROUPED_MAP_ASSIGN_COLUMNS_BY_NAME)
 
   def arrowSafeTypeConversion: Boolean = getConf(SQLConf.PANDAS_ARROW_SAFE_TYPE_CONVERSION)
+
+  def pythonUDFArrowFlightEnabled: Boolean = getConf(PYTHON_UDF_ARROW_FLIGHT_ENABLED)
 
   def pysparkWorkerPythonExecutable: Option[String] =
     getConf(SQLConf.PYSPARK_WORKER_PYTHON_EXECUTABLE)

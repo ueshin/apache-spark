@@ -20,6 +20,8 @@ Serializers for PyArrow and pandas conversions. See `pyspark.serializers` for mo
 """
 
 from itertools import groupby
+import queue
+import time
 from typing import TYPE_CHECKING, Iterator, Optional
 
 import pyspark
@@ -107,11 +109,7 @@ class ArrowCollectSerializer(Serializer):
         return "ArrowCollectSerializer(%s)" % self.serializer
 
 
-class ArrowStreamSerializer(Serializer):
-    """
-    Serializes Arrow record batches as a stream.
-    """
-
+class ArrowStreamDumper(Serializer):
     def dump_stream(self, iterator, stream):
         import pyarrow as pa
 
@@ -125,12 +123,35 @@ class ArrowStreamSerializer(Serializer):
             if writer is not None:
                 writer.close()
 
+
+class ArrowStreamLoader(Serializer):
     def load_stream(self, stream):
         import pyarrow as pa
 
         reader = pa.ipc.open_stream(stream)
         for batch in reader:
             yield batch
+
+
+class ArrowFlightLoader(Serializer):
+    def __init__(self, port, **kwargs):
+        super().__init__()
+        self._port = port
+
+    def load_stream(self, stream):
+        import pyarrow.flight as flight
+
+        location = flight.Location.for_grpc_tcp("localhost", self._port)
+        client = flight.FlightClient(location)
+        reader = client.do_get(flight.Ticket(b"test"))
+        for batch in reader:
+            yield batch.data
+
+
+class ArrowStreamSerializer(ArrowStreamDumper, ArrowStreamLoader):
+    """
+    Serializes Arrow record batches as a stream.
+    """
 
     def __repr__(self):
         return "ArrowStreamSerializer"
@@ -718,7 +739,7 @@ class ArrowStreamPandasUDFSerializer(ArrowStreamPandasSerializer):
         return "ArrowStreamPandasUDFSerializer"
 
 
-class ArrowStreamArrowUDFSerializer(ArrowStreamSerializer):
+class ArrowStreamArrowUDFDumper(ArrowStreamDumper):
     """
     Serializer used by Python worker to evaluate Arrow UDFs
     """
@@ -729,8 +750,9 @@ class ArrowStreamArrowUDFSerializer(ArrowStreamSerializer):
         safecheck,
         assign_cols_by_name,
         arrow_cast,
+        **kwargs,
     ):
-        super().__init__()
+        super().__init__(**kwargs)
         self._timezone = timezone
         self._safecheck = safecheck
         self._assign_cols_by_name = assign_cols_by_name
@@ -780,8 +802,15 @@ class ArrowStreamArrowUDFSerializer(ArrowStreamSerializer):
 
         return ArrowStreamSerializer.dump_stream(self, wrap_and_init_stream(), stream)
 
+
+class ArrowStreamArrowUDFSerializer(ArrowStreamArrowUDFDumper, ArrowStreamLoader):
     def __repr__(self):
         return "ArrowStreamArrowUDFSerializer"
+
+
+class ArrowFlightArrowUDFSerializer(ArrowStreamArrowUDFDumper, ArrowFlightLoader):
+    def __repr__(self):
+        return "ArrowFlightArrowUDFSerializer"
 
 
 class ArrowBatchUDFSerializer(ArrowStreamArrowUDFSerializer):

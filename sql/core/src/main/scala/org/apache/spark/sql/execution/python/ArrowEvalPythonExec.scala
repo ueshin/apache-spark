@@ -102,7 +102,8 @@ case class ArrowEvalPythonExec(
       pythonMetrics,
       jobArtifactUUID,
       sessionUUID,
-      conf.pythonUDFProfiler)
+      conf.pythonUDFProfiler,
+      conf.pythonUDFArrowFlightEnabled)
   }
 
   override protected def withNewChildInternal(newChild: SparkPlan): SparkPlan =
@@ -129,7 +130,8 @@ class ArrowEvalPythonEvaluatorFactory(
     pythonMetrics: Map[String, SQLMetric],
     jobArtifactUUID: Option[String],
     sessionUUID: Option[String],
-    profiler: Option[String])
+    profiler: Option[String],
+    pythonUDFArrowFlightEnabled: Boolean = false)
   extends EvalPythonEvaluatorFactory(childOutput, udfs, output) {
 
   override def evaluate(
@@ -145,18 +147,33 @@ class ArrowEvalPythonEvaluatorFactory(
 
     val batchIter = Iterator(iter)
 
-    val pyRunner = new ArrowPythonWithNamedArgumentRunner(
-      funcs,
-      evalType,
-      argMetas,
-      schema,
-      sessionLocalTimeZone,
-      largeVarTypes,
-      pythonRunnerConf,
-      pythonMetrics,
-      jobArtifactUUID,
-      sessionUUID,
-      profiler) with BatchedPythonArrowInput
+    val pyRunner = if (pythonUDFArrowFlightEnabled) {
+      new ArrowPythonWithNamedArgumentRunner(
+        funcs,
+        evalType,
+        argMetas,
+        schema,
+        sessionLocalTimeZone,
+        largeVarTypes,
+        pythonRunnerConf,
+        pythonMetrics,
+        jobArtifactUUID,
+        sessionUUID,
+        profiler) with PythonArrowFlightInput
+    } else {
+      new ArrowPythonWithNamedArgumentRunner(
+        funcs,
+        evalType,
+        argMetas,
+        schema,
+        sessionLocalTimeZone,
+        largeVarTypes,
+        pythonRunnerConf,
+        pythonMetrics,
+        jobArtifactUUID,
+        sessionUUID,
+        profiler) with BatchedPythonArrowInput
+    }
     val columnarBatchIter = pyRunner.compute(batchIter, context.partitionId(), context)
 
     columnarBatchIter.flatMap { batch =>
