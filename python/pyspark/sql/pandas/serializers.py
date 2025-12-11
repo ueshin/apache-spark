@@ -141,10 +141,15 @@ class ArrowFlightLoader(Serializer):
         import pyarrow.flight as flight
 
         class FlightReader(flight.FlightServerBase):
+            # Sentinel object to signal end of stream
+            _END_OF_STREAM = object()
+
             def __init__(self, *args, **kwargs):
                 super().__init__(*args, **kwargs)
-                self._batches = queue.Queue()
-                self._reading = True
+                # Use a bounded queue to apply backpressure if consumer is slow
+                self._batches: queue.Queue = queue.Queue(maxsize=16)
+                self._done_event = threading.Event()
+                self._error: Optional[BaseException] = None
 
             def do_put(
                 self,
@@ -153,18 +158,44 @@ class ArrowFlightLoader(Serializer):
                 reader: flight.MetadataRecordBatchReader,
                 writer: flight.FlightMetadataWriter,
             ):
-                for chunk in reader:
-                    self._batches.put(chunk.data)
-                self._reading = False
+                try:
+                    for chunk in reader:
+                        self._batches.put(chunk.data)
+                except BaseException as e:
+                    self._error = e
+                finally:
+                    # Signal end of stream with sentinel
+                    self._batches.put(self._END_OF_STREAM)
+                    self._done_event.set()
 
             def __iter__(self):
-                while self._reading or self._batches.qsize() > 0:
-                    try:
-                        yield self._batches.get(block=False)
-                    except queue.Empty:
-                        pass
+                while True:
+                    # Block until data is available
+                    batch = self._batches.get(block=True)
+
+                    # Check for end-of-stream sentinel
+                    if batch is self._END_OF_STREAM:
+                        # Re-raise any error from do_put
+                        if self._error is not None:
+                            raise self._error
+                        break
+                    yield batch
 
         self._flight_reader = FlightReader(flight.Location.for_grpc_tcp("localhost", 0))
+
+        # Wait for server to be ready by attempting a connection
+        self._wait_for_server_ready()
+
+    def _wait_for_server_ready(self, timeout=5.0):
+        """Wait until the Flight server is ready to accept connections."""
+        import pyarrow.flight as flight
+
+        location = flight.Location.for_grpc_tcp("localhost", self._flight_reader.port)
+        client = flight.FlightClient(location)
+        try:
+            client.wait_for_available(timeout=timeout)
+        finally:
+            client.close()
 
     def dump_stream(self, iterator, stream):
         write_int(self._flight_reader.port, stream)

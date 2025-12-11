@@ -354,7 +354,7 @@ class ArrowUDFBenchmark:
 
         # Test configurations
         data_sizes = [10000, 100000, 500000]
-        implementations = ["flight", "standard"]
+        implementations = ["standard", "flight"]
 
         spark = self.create_spark_session()
 
