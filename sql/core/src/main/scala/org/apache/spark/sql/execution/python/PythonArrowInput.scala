@@ -16,9 +16,10 @@
  */
 package org.apache.spark.sql.execution.python
 
-import java.io.DataOutputStream
+import java.io.{DataInputStream, DataOutputStream}
 import java.net.ServerSocket
 import java.nio.channels.Channels
+import java.util.concurrent.atomic.AtomicBoolean
 
 import scala.collection.concurrent
 import scala.util.Random
@@ -382,9 +383,21 @@ object PythonArrowFlightInput {
   }
 }
 
-private[python] trait PythonArrowFlightInput {
-  self: BasePythonRunner[Iterator[InternalRow], _] with PythonArrowInput[Iterator[InternalRow]] =>
+private[python] trait PythonArrowFlightInput[OUT]
+  extends BasePythonRunner[Iterator[InternalRow], OUT] {
+  self: PythonArrowInput[Iterator[InternalRow]] =>
   protected val arrowWriter: arrow.ArrowWriter
+
+  private var port: Int = 0
+
+  protected abstract override def newReaderIterator(
+      stream: DataInputStream, writer: Writer,
+      startTime: Long, env: SparkEnv, worker: PythonWorker, pid: Option[Int],
+      releasedOrClosed: AtomicBoolean, context: TaskContext): Iterator[OUT] = {
+    port = stream.readInt()
+    super
+      .newReaderIterator(stream, writer, startTime, env, worker, pid, releasedOrClosed, context)
+  }
 
   protected override def newWriter(
       env: SparkEnv,
@@ -394,21 +407,21 @@ private[python] trait PythonArrowFlightInput {
       context: TaskContext): Writer = {
     new Writer(env, worker, inputIterator, partitionIndex, context) {
 
-      private val port = PythonArrowFlightInput.getAvailablePort()
-      private val location = Location.forGrpcInsecure("localhost", port)
       private var flightClient: FlightClient = _
       private var writer: FlightClient.ClientStreamListener = _
 
       protected override def writeCommand(dataOut: DataOutputStream): Unit = {
-        dataOut.writeInt(port)
         handleMetadataBeforeExec(dataOut)
         writeUDF(dataOut)
       }
 
       override def writeNextInputToStream(dataOut: DataOutputStream): Boolean = {
         if (flightClient == null) {
+          if (port == 0) {
+            return true
+          }
           if (inputIterator.hasNext) {
-            Thread.sleep(100)
+            val location = Location.forGrpcInsecure("localhost", port)
             flightClient = FlightClient.builder(allocator, location).build()
             val descriptor = FlightDescriptor.path(s"batch_${System.nanoTime()}")
             writer = flightClient.startPut(descriptor, root, new SyncPutListener())
@@ -440,6 +453,9 @@ private[python] trait PythonArrowFlightInput {
           false
         }
       }
+
+      override def writeNextInputToStreamBreakable(dataOut: DataOutputStream): (Boolean, Boolean) =
+        (writeNextInputToStream(dataOut), true)
     }
   }
 }

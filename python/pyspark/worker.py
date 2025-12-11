@@ -2822,19 +2822,19 @@ def read_udfs(pickleSer, infile, eval_type, runner_conf):
             )
         elif eval_type == PythonEvalType.SQL_MAP_ARROW_ITER_UDF:
             ser = ArrowStreamUDFSerializer()
-        elif eval_type == PythonEvalType.SQL_SCALAR_ARROW_UDF and runner_conf.arrow_flight_enabled:
-            port = read_int(infile)
-            ser = ArrowFlightArrowUDFSerializer(
-                runner_conf.timezone, True, runner_conf.assign_cols_by_name, True, port=port
-            )
         elif eval_type in (
             PythonEvalType.SQL_SCALAR_ARROW_UDF,
             PythonEvalType.SQL_SCALAR_ARROW_ITER_UDF,
         ):
-            # Arrow cast and safe check are always enabled
-            ser = ArrowStreamArrowUDFSerializer(
-                runner_conf.timezone, True, runner_conf.assign_cols_by_name, True
-            )
+            if runner_conf.arrow_flight_enabled:
+                ser = ArrowFlightArrowUDFSerializer(
+                    runner_conf.timezone, True, runner_conf.assign_cols_by_name, True
+                )
+            else:
+                # Arrow cast and safe check are always enabled
+                ser = ArrowStreamArrowUDFSerializer(
+                    runner_conf.timezone, True, runner_conf.assign_cols_by_name, True
+                )
         elif (
             eval_type == PythonEvalType.SQL_ARROW_BATCHED_UDF
             and not runner_conf.use_legacy_pandas_udf_conversion

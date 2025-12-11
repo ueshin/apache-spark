@@ -422,6 +422,9 @@ private[spark] abstract class BasePythonRunner[IN, OUT](
      */
     def writeNextInputToStream(dataOut: DataOutputStream): Boolean
 
+    def writeNextInputToStreamBreakable(dataOut: DataOutputStream): (Boolean, Boolean) =
+      (writeNextInputToStream(dataOut), false)
+
     def open(dataOut: DataOutputStream): Unit = Utils.logUncaughtExceptions {
       val isUnixDomainSock = authHelper.conf.get(PYTHON_UNIX_DOMAIN_SOCKET_ENABLED)
       lazy val sockPath = new File(
@@ -967,7 +970,8 @@ private[spark] abstract class BasePythonRunner[IN, OUT](
      */
     private def writeAdditionalInputToPythonWorker(): Unit = {
       var acceptsInput = true
-      while (acceptsInput && (hasInput || buffer.hasRemaining)) {
+      var shouldBreak = false
+      while (acceptsInput && (hasInput || buffer.hasRemaining) && !shouldBreak) {
         if (!buffer.hasRemaining && hasInput) {
           // No buffered data is available. Try to read input into the buffer.
           bufferStream.reset()
@@ -977,8 +981,10 @@ private[spark] abstract class BasePythonRunner[IN, OUT](
           val dataOut = new DataOutputStream(bufferStream)
           // Try not to grow the buffer much beyond `bufferSize`. This is inevitable for large
           // input rows.
-          while (bufferStream.size() < bufferSize && hasInput && !shouldFlush()) {
-            hasInput = writer.writeNextInputToStream(dataOut)
+          while (bufferStream.size() < bufferSize && hasInput && !shouldBreak && !shouldFlush()) {
+            val next = writer.writeNextInputToStreamBreakable(dataOut)
+            hasInput = next._1
+            shouldBreak = next._2
           }
           if (!hasInput) {
             // Reached the end of the input.

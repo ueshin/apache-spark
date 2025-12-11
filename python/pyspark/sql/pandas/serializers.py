@@ -135,8 +135,8 @@ class ArrowStreamLoader(Serializer):
 
 
 class ArrowFlightLoader(Serializer):
-    def __init__(self, port, **kwargs):
-        super().__init__()
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
 
         import pyarrow.flight as flight
 
@@ -157,17 +157,19 @@ class ArrowFlightLoader(Serializer):
                     self._batches.put(batch.data)
                 self._reading = False
 
-        self._flight_reader = FlightReader(flight.Location.for_grpc_tcp("localhost", port))
+        self._flight_reader = FlightReader(flight.Location.for_grpc_tcp("localhost", 0))
+
+    def dump_stream(self, iterator, stream):
+        write_int(self._flight_reader.port, stream)
+        stream.flush()
+        super().dump_stream(iterator, stream)
 
     def load_stream(self, stream):
         try:
             has_batches = read_bool(stream)
             if has_batches:
-                while self._flight_reader._reading or self._flight_reader._batches:
-                    try:
-                        yield self._flight_reader._batches.get(timeout=1)
-                    except queue.Empty:
-                        time.sleep(0.01)
+                while self._flight_reader._reading or self._flight_reader._batches.qsize():
+                    yield self._flight_reader._batches.get()
         finally:
             self._flight_reader.shutdown()
 
@@ -774,9 +776,8 @@ class ArrowStreamArrowUDFDumper(ArrowStreamDumper):
         safecheck,
         assign_cols_by_name,
         arrow_cast,
-        **kwargs,
     ):
-        super().__init__(**kwargs)
+        super().__init__()
         self._timezone = timezone
         self._safecheck = safecheck
         self._assign_cols_by_name = assign_cols_by_name
@@ -832,7 +833,7 @@ class ArrowStreamArrowUDFSerializer(ArrowStreamArrowUDFDumper, ArrowStreamLoader
         return "ArrowStreamArrowUDFSerializer"
 
 
-class ArrowFlightArrowUDFSerializer(ArrowStreamArrowUDFDumper, ArrowFlightLoader):
+class ArrowFlightArrowUDFSerializer(ArrowFlightLoader, ArrowStreamArrowUDFDumper):
     def __repr__(self):
         return "ArrowFlightArrowUDFSerializer"
 
