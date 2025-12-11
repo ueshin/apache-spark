@@ -1280,6 +1280,13 @@ class ScalarArrowUDFTests(ScalarArrowUDFTestsMixin, ReusedSQLTestCase):
         ReusedSQLTestCase.tearDownClass()
 
 
+class ScalarArrowFlightUDFTests(ScalarArrowUDFTests):
+    @classmethod
+    def setUpClass(cls):
+        super().setUpClass()
+        cls.spark.conf.set("spark.sql.execution.pythonUDF.arrow.flight.enabled", "true")
+
+
 if __name__ == "__main__":
     from pyspark.sql.tests.arrow.test_arrow_udf_scalar import *  # noqa: F401
 
