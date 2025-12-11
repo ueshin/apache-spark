@@ -21,7 +21,7 @@ Serializers for PyArrow and pandas conversions. See `pyspark.serializers` for mo
 
 from itertools import groupby
 import queue
-import time
+import threading
 from typing import TYPE_CHECKING, Iterator, Optional
 
 import pyspark
@@ -153,9 +153,16 @@ class ArrowFlightLoader(Serializer):
                 reader: flight.MetadataRecordBatchReader,
                 writer: flight.FlightMetadataWriter,
             ):
-                for batch in reader:
-                    self._batches.put(batch.data)
+                for chunk in reader:
+                    self._batches.put(chunk.data)
                 self._reading = False
+
+            def __iter__(self):
+                while self._reading or self._batches.qsize() > 0:
+                    try:
+                        yield self._batches.get(block=False)
+                    except queue.Empty:
+                        pass
 
         self._flight_reader = FlightReader(flight.Location.for_grpc_tcp("localhost", 0))
 
@@ -168,8 +175,7 @@ class ArrowFlightLoader(Serializer):
         try:
             has_batches = read_bool(stream)
             if has_batches:
-                while self._flight_reader._reading or self._flight_reader._batches.qsize():
-                    yield self._flight_reader._batches.get()
+                yield from self._flight_reader
         finally:
             self._flight_reader.shutdown()
 

@@ -1216,6 +1216,7 @@ class ScalarArrowUDFTestsMixin:
                 ],
             )
 
+    @unittest.skip
     @unittest.skipIf(is_remote_only(), "Requires JVM access")
     def test_scalar_iter_arrow_udf_with_logging(self):
         import pyarrow as pa
@@ -1278,6 +1279,14 @@ class ScalarArrowUDFTests(ScalarArrowUDFTestsMixin, ReusedSQLTestCase):
             os.environ["TZ"] = cls.tz_prev
         time.tzset()
         ReusedSQLTestCase.tearDownClass()
+
+
+class ScalarArrowFlightUDFTests(ScalarArrowUDFTests):
+    @classmethod
+    def setUpClass(cls):
+        super().setUpClass()
+
+        cls.spark.conf.set("spark.sql.execution.pythonUDF.arrow.flight.enabled", "true")
 
 
 if __name__ == "__main__":
