@@ -101,9 +101,10 @@ class PerformanceMonitor:
 class ArrowUDFBenchmark:
     """Comprehensive benchmark suite for Arrow UDFs."""
 
-    def __init__(self):
+    def __init__(self, *, _n: int):
         self.results: List[BenchmarkResult] = []
         self.monitor = PerformanceMonitor()
+        self._n = _n
 
     def create_spark_session(self, use_flight: bool = False) -> SparkSession:
         """Create Spark session with appropriate configuration."""
@@ -114,13 +115,9 @@ class ArrowUDFBenchmark:
             .config("spark.sql.execution.pythonUDF.arrow.enabled", "true")
             .config("spark.sql.adaptive.enabled", "false")
             .config("spark.sql.adaptive.coalescePartitions.enabled", "false")
+            .config("spark.sql.execution.pyspark.udf.idleTimeoutSeconds", 5)
+            .config("spark.sql.execution.pyspark.udf.tracebackDumpIntervalSeconds", 5)
         )
-
-        if use_flight:
-            builder = builder.config("spark.sql.execution.pythonUDF.arrow.flight.enabled", "true")
-        else:
-            builder = builder.config("spark.sql.execution.pythonUDF.arrow.flight.enabled", "false")
-
         return builder.getOrCreate()
 
     @contextmanager
@@ -135,12 +132,12 @@ class ArrowUDFBenchmark:
             execution_time = time.time() - start_time
             perf_metrics = self.monitor.get_results(execution_time)
 
-            throughput = data_size / execution_time if execution_time > 0 else 0
+            throughput = (data_size * self._n) / execution_time if execution_time > 0 else 0
 
             result = BenchmarkResult(
                 test_name=test_name,
                 implementation=implementation,
-                data_size=data_size,
+                data_size=(data_size * self._n),
                 execution_time=execution_time,
                 memory_peak_mb=perf_metrics["memory_peak_mb"],
                 memory_avg_mb=perf_metrics["memory_avg_mb"],
@@ -208,15 +205,18 @@ class ArrowUDFBenchmark:
         df = self.create_test_data(spark, data_size, "simple")
 
         with self.timed_execution("string_length", implementation, data_size):
-            result = df.select(string_length_udf(col("text")).alias("length")).collect()
+            for _ in range(self._n):
+                result = df.select(string_length_udf(col("text")).alias("length")).collect()
             self.monitor.sample_metrics()
 
         with self.timed_execution("string_upper", implementation, data_size):
-            result = df.select(string_upper_udf(col("text")).alias("upper")).collect()
+            for _ in range(self._n):
+                result = df.select(string_upper_udf(col("text")).alias("upper")).collect()
             self.monitor.sample_metrics()
 
         with self.timed_execution("string_reverse", implementation, data_size):
-            result = df.select(string_reverse_udf(col("text")).alias("reversed")).collect()
+            for _ in range(self._n):
+                result = df.select(string_reverse_udf(col("text")).alias("reversed")).collect()
             self.monitor.sample_metrics()
 
     def benchmark_numeric_operations(
@@ -249,15 +249,18 @@ class ArrowUDFBenchmark:
         df = self.create_test_data(spark, data_size, "simple")
 
         with self.timed_execution("math_complex", implementation, data_size):
-            result = df.select(math_complex_udf(col("value")).alias("complex_math")).collect()
+            for _ in range(self._n):
+                result = df.select(math_complex_udf(col("value")).alias("complex_math")).collect()
             self.monitor.sample_metrics()
 
         with self.timed_execution("statistical", implementation, data_size):
-            result = df.select(statistical_udf(col("value")).alias("stats")).collect()
+            for _ in range(self._n):
+                result = df.select(statistical_udf(col("value")).alias("stats")).collect()
             self.monitor.sample_metrics()
 
         with self.timed_execution("aggregation", implementation, data_size):
-            result = df.select(aggregation_udf(col("value")).alias("agg")).collect()
+            for _ in range(self._n):
+                result = df.select(aggregation_udf(col("value")).alias("agg")).collect()
             self.monitor.sample_metrics()
 
     def benchmark_multi_column_operations(
@@ -286,17 +289,19 @@ class ArrowUDFBenchmark:
         df = self.create_test_data(spark, data_size, "simple")
 
         with self.timed_execution("multi_column_math", implementation, data_size):
-            result = df.select(
-                multi_column_math_udf(
-                    col("value"), col("id").cast("double"), col("category").cast("double")
-                ).alias("multi_math")
-            ).collect()
+            for _ in range(self._n):
+                result = df.select(
+                    multi_column_math_udf(
+                        col("value"), col("id").cast("double"), col("category").cast("double")
+                    ).alias("multi_math")
+                ).collect()
             self.monitor.sample_metrics()
 
         with self.timed_execution("multi_column_string", implementation, data_size):
-            result = df.select(
-                multi_column_string_udf(col("text"), col("category")).alias("combined")
-            ).collect()
+            for _ in range(self._n):
+                result = df.select(
+                    multi_column_string_udf(col("text"), col("category")).alias("combined")
+                ).collect()
             self.monitor.sample_metrics()
 
     def benchmark_iterator_operations(
@@ -329,11 +334,15 @@ class ArrowUDFBenchmark:
         df = self.create_test_data(spark, data_size, "simple")
 
         with self.timed_execution("batch_processing", implementation, data_size):
-            result = df.select(batch_processing_udf(col("value")).alias("batch_proc")).collect()
+            for _ in range(self._n):
+                result = df.select(batch_processing_udf(col("value")).alias("batch_proc")).collect()
             self.monitor.sample_metrics()
 
         with self.timed_execution("stateful_processing", implementation, data_size):
-            result = df.select(stateful_processing_udf(col("category")).alias("stateful")).collect()
+            for _ in range(self._n):
+                result = df.select(
+                    stateful_processing_udf(col("category")).alias("stateful")
+                ).collect()
             self.monitor.sample_metrics()
 
     def benchmark_data_size_scaling(self, spark: SparkSession, implementation: str):
@@ -348,22 +357,30 @@ class ArrowUDFBenchmark:
             df = self.create_test_data(spark, size, "simple")
 
             with self.timed_execution(f"scaling_test_{size}", implementation, size):
-                result = df.select(scaling_test_udf(col("value")).alias("scaled")).collect()
+                for _ in range(self._n):
+                    result = df.select(scaling_test_udf(col("value")).alias("scaled")).collect()
                 self.monitor.sample_metrics()
 
     def run_comprehensive_benchmark(self):
         """Run comprehensive benchmark comparing standard vs Flight implementations."""
-        print("Starting Comprehensive Arrow UDF Benchmark")
+        print(f"Starting Comprehensive Arrow UDF Benchmark: n={self._n}")
         print("=" * 60)
 
         # Test configurations
         data_sizes = [10000, 100000, 500000]
         implementations = ["standard", "flight"]
 
+        spark = self.create_spark_session()
+
         for implementation in implementations:
             print(f"\nTesting {implementation.upper()} implementation...")
 
-            spark = self.create_spark_session(use_flight=(implementation == "flight"))
+            use_flight = implementation == "flight"
+
+            if use_flight:
+                spark.conf.set("spark.sql.execution.pythonUDF.arrow.flight.enabled", "true")
+            else:
+                spark.conf.set("spark.sql.execution.pythonUDF.arrow.flight.enabled", "false")
 
             try:
                 for data_size in data_sizes:
@@ -374,15 +391,16 @@ class ArrowUDFBenchmark:
                     self.benchmark_numeric_operations(spark, data_size, implementation)
                     self.benchmark_multi_column_operations(spark, data_size, implementation)
 
-                    if data_size <= 100000:  # Iterator tests only for smaller datasets
-                        self.benchmark_iterator_operations(spark, data_size, implementation)
+                    # if data_size <= 100000:  # Iterator tests only for smaller datasets
+                    #     self.benchmark_iterator_operations(spark, data_size, implementation)
 
                 # Run scaling test
                 self.benchmark_data_size_scaling(spark, implementation)
 
             finally:
-                spark.stop()
                 time.sleep(2)  # Allow cleanup
+
+        spark.stop()
 
     def generate_report(self) -> str:
         """Generate comprehensive benchmark report."""
@@ -558,7 +576,7 @@ def main():
     print("with the new Arrow Flight-based implementation.")
     print("")
 
-    benchmark = ArrowUDFBenchmark()
+    benchmark = ArrowUDFBenchmark(_n=5)
 
     try:
         benchmark.run_comprehensive_benchmark()
