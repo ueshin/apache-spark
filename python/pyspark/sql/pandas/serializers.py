@@ -135,16 +135,25 @@ class ArrowStreamLoader(Serializer):
 
 
 class ArrowFlightLoader(Serializer):
+    _END_OF_STREAM = object()
+    _DEFAULT_QUEUE_SIZE = 16
+
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
 
         import pyarrow.flight as flight
 
+        # Capture class-level constants for use in nested class
+        END_OF_STREAM = ArrowFlightLoader._END_OF_STREAM
+        DEFAULT_QUEUE_SIZE = ArrowFlightLoader._DEFAULT_QUEUE_SIZE
+
         class FlightReader(flight.FlightServerBase):
             def __init__(self, *args, **kwargs):
                 super().__init__(*args, **kwargs)
-                self._batches = queue.Queue()
-                self._reading = True
+                # Use a bounded queue to apply backpressure if consumer is slow
+                self._batches: queue.Queue = queue.Queue(maxsize=DEFAULT_QUEUE_SIZE)
+                self._done_event = threading.Event()
+                self._error: Optional[BaseException] = None
 
             def do_put(
                 self,
@@ -153,16 +162,28 @@ class ArrowFlightLoader(Serializer):
                 reader: flight.MetadataRecordBatchReader,
                 writer: flight.FlightMetadataWriter,
             ):
-                for chunk in reader:
-                    self._batches.put(chunk.data)
-                self._reading = False
+                try:
+                    for chunk in reader:
+                        self._batches.put(chunk.data)
+                except BaseException as e:
+                    self._error = e
+                finally:
+                    # Signal end of stream with sentinel
+                    self._batches.put(END_OF_STREAM)
+                    self._done_event.set()
 
             def __iter__(self):
-                while self._reading or self._batches.qsize() > 0:
-                    try:
-                        yield self._batches.get(block=False)
-                    except queue.Empty:
-                        pass
+                while True:
+                    # Block until data is available
+                    batch = self._batches.get()
+
+                    # Check for end-of-stream sentinel
+                    if batch is END_OF_STREAM:
+                        # Re-raise any error from do_put
+                        if self._error is not None:
+                            raise self._error
+                        break
+                    yield batch
 
         self._flight_reader = FlightReader(flight.Location.for_grpc_tcp("127.0.0.1", 0))
 
