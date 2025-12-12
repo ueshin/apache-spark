@@ -164,7 +164,7 @@ class ArrowFlightLoader(Serializer):
                     except queue.Empty:
                         pass
 
-        self._flight_reader = FlightReader(flight.Location.for_grpc_tcp("localhost", 0))
+        self._flight_reader = FlightReader(flight.Location.for_grpc_tcp("127.0.0.1", 0))
 
         # Wait for server to be ready by attempting a connection
         self._wait_for_server_ready()
@@ -173,7 +173,7 @@ class ArrowFlightLoader(Serializer):
         """Wait until the Flight server is ready to accept connections."""
         import pyarrow.flight as flight
 
-        location = flight.Location.for_grpc_tcp("localhost", self._flight_reader.port)
+        location = flight.Location.for_grpc_tcp("127.0.0.1", self._flight_reader.port)
         client = flight.FlightClient(location)
         try:
             client.wait_for_available(timeout=timeout)
